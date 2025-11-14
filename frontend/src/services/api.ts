@@ -411,6 +411,7 @@ export const inspirationApi = {
   generateOptions: (data: {
     step: 'title' | 'description' | 'theme' | 'genre';
     context: {
+      idea?: string;
       title?: string;
       description?: string;
       theme?: string;

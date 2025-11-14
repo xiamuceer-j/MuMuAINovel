@@ -1,0 +1,106 @@
+# 开发环境专用Dockerfile - 支持热重载和增量构建
+# 生产构建请使用 Dockerfile
+
+# ===============================
+# 基础镜像层 - 缓存优化
+# ===============================
+
+# Node.js 基础镜像
+FROM node:22-alpine AS node-base
+WORKDIR /frontend
+RUN npm config set registry https://registry.npmmirror.com
+
+# Python 基础镜像
+FROM python:3.11-slim AS python-base
+WORKDIR /app
+
+# 安装系统依赖 (缓存层)
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y gcc curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ===============================
+# 前端开发环境
+# ===============================
+
+FROM node-base AS frontend-development
+
+# 复制package文件并安装依赖 (利用Docker层缓存)
+COPY frontend/package*.json ./
+RUN npm install
+
+# 开发服务器启动脚本
+COPY <<EOF /frontend/start-dev.sh
+#!/bin/sh
+# 确保node_modules权限正确
+if [ ! -d "node_modules" ]; then
+    npm install
+fi
+# 启动开发服务器
+npm run dev
+EOF
+RUN chmod +x /frontend/start-dev.sh
+
+EXPOSE 3000
+CMD ["/frontend/start-dev.sh"]
+
+# ===============================
+# 后端开发环境
+# ===============================
+
+FROM python-base AS backend-development
+
+# 复制Python依赖文件 (利用Docker层缓存)
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+
+# 复制embedding模型文件 (如果是首次构建，从生产镜像复制)
+# 注意：这个步骤只在本地环境首次运行时需要
+# RUN if [ ! -d "backend/embedding" ]; then \
+#     echo "正在从生产环境复制embedding模型..." && \
+#     mkdir -p backend/embedding && \
+#     # 这里可以添加从生产环境复制的逻辑，或者手动复制
+#     fi
+
+# 安装nodemon用于热重载
+RUN npm install -g nodemon
+
+# 开发环境启动脚本
+COPY <<EOF /app/start-dev.sh
+#!/bin/sh
+# 等待数据库启动
+echo "等待PostgreSQL启动..."
+while ! nc -z postgres 5432; do
+  sleep 1
+done
+echo "PostgreSQL已启动"
+
+# 启动后端开发服务器
+echo "启动后端开发服务器..."
+cd /app/backend
+if [ ! -d "node_modules" ]; then
+    echo "安装后端node_modules..."
+    npm install
+fi
+
+# 使用nodemon监听Python文件变化
+nodemon --ext py --exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+EOF
+RUN chmod +x /app/start-dev.sh
+
+EXPOSE 8000
+CMD ["/app/start-dev.sh"]
+
+# ===============================
+# 完整开发环境 (可选)
+# ===============================
+
+FROM backend-development AS full-development
+
+# 可以添加更多开发工具
+RUN pip install --no-cache-dir pytest pytest-asyncipython black flake8
+
+# 复制开发配置
+COPY docker-compose.dev.yml /app/docker-compose.dev.yml

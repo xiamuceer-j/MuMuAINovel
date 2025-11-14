@@ -18,6 +18,7 @@ interface Message {
 }
 
 interface WizardData {
+  idea: string;
   title: string;
   description: string;
   theme: string;
@@ -31,7 +32,7 @@ const Inspiration: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       type: 'ai',
-      content: '你好！我是你的AI创作助手。让我们一起创作一部精彩的小说吧！\n\n请告诉我，你想写一本什么样的小说？',
+      content: '🚀 欢迎来到灵感模式！我是你的爆款小说生成师！\n\n在这里，你的每个想法都能被我打造成千万阅读的爆款！\n\n💡 先告诉我你的脑洞，让我为你设计一个惊艳的开局吧！',
     }
   ]);
   const [inputValue, setInputValue] = useState('');
@@ -141,7 +142,7 @@ const Inspiration: React.FC = () => {
       content: inputValue,
     };
     setMessages(prev => [...prev, userMessage]);
-    
+
     const userInput = inputValue;
     setInputValue('');
     setLoading(true);
@@ -150,9 +151,9 @@ const Inspiration: React.FC = () => {
       if (currentStep === 'idea') {
         const requestData = {
           step: 'title' as const,
-          context: { description: userInput }
+          context: { idea: userInput }
         };
-        
+
         const response = await inspirationApi.generateOptions(requestData);
 
         // 前端格式校验：检查是否有错误或选项数量不足
@@ -176,8 +177,10 @@ const Inspiration: React.FC = () => {
         };
         setMessages(prev => [...prev, aiMessage]);
         setCurrentStep('title');
+        setWizardData(prev => ({ ...prev, idea: userInput }));
         setLastFailedRequest(null);
       } else {
+        // 对于其他步骤，用户输入应该重新生成当前步骤的选项，而不是进入下一步
         await handleCustomInput(userInput);
       }
     } catch (error: any) {
@@ -222,6 +225,7 @@ const Inspiration: React.FC = () => {
       const summary = `
 太棒了！你的小说设定已完成，请确认：
 
+💡 想法：${updatedData.idea}
 📖 书名：${updatedData.title}
 📝 简介：${updatedData.description}
 🎯 主题：${updatedData.theme}
@@ -295,8 +299,11 @@ const Inspiration: React.FC = () => {
     setLoading(true);
     try {
       const updatedData = { ...wizardData };
-      
-      if (currentStep === 'title') {
+
+      // 根据当前步骤更新数据
+      if (currentStep === 'idea') {
+        updatedData.idea = input;
+      } else if (currentStep === 'title') {
         updatedData.title = input;
       } else if (currentStep === 'description') {
         updatedData.description = input;
@@ -307,9 +314,128 @@ const Inspiration: React.FC = () => {
       } else if (currentStep === 'perspective') {
         updatedData.narrative_perspective = input;
       }
-      
+
       setWizardData(updatedData);
-      await generateNextStep(updatedData);
+
+      // 用户自定义输入时，重新生成当前步骤的选项（不进入下一步）
+      if (currentStep === 'title') {
+        // 重新生成标题选项
+        const requestData = {
+          step: 'title' as const,
+          context: { idea: wizardData.idea || updatedData.idea }
+        };
+
+        const response = await inspirationApi.generateOptions(requestData);
+
+        if (response.error || !response.options || response.options.length < 3) {
+          const errorMessage: Message = {
+            type: 'ai',
+            content: response.error
+              ? `根据你的新想法重新生成书名时出错：${response.error}\n\n你可以选择：`
+              : `生成的选项格式不正确（至少需要3个有效选项）\n\n你可以选择：`,
+            options: response.options && response.options.length > 0 ? response.options : ['重新生成', '我自己输入书名']
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          setLastFailedRequest(requestData);
+          return;
+        }
+
+        const aiMessage: Message = {
+          type: 'ai',
+          content: response.prompt || '根据你的想法，我重新准备了几个书名：',
+          options: response.options
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        setLastFailedRequest(null);
+      } else if (currentStep === 'description') {
+        // 重新生成简介选项
+        const requestData = {
+          step: 'description' as const,
+          context: { idea: wizardData.idea, title: wizardData.title }
+        };
+
+        const response = await inspirationApi.generateOptions(requestData);
+
+        if (response.error || !response.options || response.options.length < 3) {
+          const errorMessage: Message = {
+            type: 'ai',
+            content: response.error
+              ? `重新生成简介时出错：${response.error}\n\n你可以选择：`
+              : `生成的选项格式不正确（至少需要3个有效选项）\n\n你可以选择：`,
+            options: response.options && response.options.length > 0 ? response.options : ['重新生成', '我自己输入']
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          setLastFailedRequest(requestData);
+          return;
+        }
+
+        const aiMessage: Message = {
+          type: 'ai',
+          content: response.prompt || '根据你的想法，我重新准备了几个简介：',
+          options: response.options
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        setLastFailedRequest(null);
+      } else if (currentStep === 'theme') {
+        // 重新生成主题选项
+        const requestData = {
+          step: 'theme' as const,
+          context: { idea: wizardData.idea, title: wizardData.title, description: wizardData.description }
+        };
+
+        const response = await inspirationApi.generateOptions(requestData);
+
+        if (response.error || !response.options || response.options.length < 3) {
+          const errorMessage: Message = {
+            type: 'ai',
+            content: response.error
+              ? `重新生成主题时出错：${response.error}\n\n你可以选择：`
+              : `生成的选项格式不正确（至少需要3个有效选项）\n\n你可以选择：`,
+            options: response.options && response.options.length > 0 ? response.options : ['重新生成', '我自己输入']
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          setLastFailedRequest(requestData);
+          return;
+        }
+
+        const aiMessage: Message = {
+          type: 'ai',
+          content: response.prompt || '根据你的想法，我重新准备了几个主题：',
+          options: response.options
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        setLastFailedRequest(null);
+      } else if (currentStep === 'genre') {
+        // 重新生成类型选项
+        const requestData = {
+          step: 'genre' as const,
+          context: { idea: wizardData.idea, title: wizardData.title, description: wizardData.description, theme: wizardData.theme }
+        };
+
+        const response = await inspirationApi.generateOptions(requestData);
+
+        if (response.error || !response.options || response.options.length < 3) {
+          const errorMessage: Message = {
+            type: 'ai',
+            content: response.error
+              ? `重新生成类型时出错：${response.error}\n\n你可以选择：`
+              : `生成的选项格式不正确（至少需要3个有效选项）\n\n你可以选择：`,
+            options: response.options && response.options.length > 0 ? response.options : ['重新生成', '我自己输入']
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          setLastFailedRequest(requestData);
+          return;
+        }
+
+        const aiMessage: Message = {
+          type: 'ai',
+          content: response.prompt || '根据你的想法，我重新准备了几个类型：',
+          options: response.options,
+          isMultiSelect: true
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        setLastFailedRequest(null);
+      }
     } catch (error: any) {
       console.error('处理自定义输入失败:', error);
       message.error(error.response?.data?.detail || '处理失败，请重试');
@@ -492,7 +618,7 @@ const Inspiration: React.FC = () => {
     if (nextStep === 'description') {
       const requestData = {
         step: 'description' as const,
-        context: { title: data.title }
+        context: { idea: wizardData.idea, title: data.title }
       };
       const response = await inspirationApi.generateOptions(requestData);
 
@@ -592,7 +718,7 @@ const Inspiration: React.FC = () => {
     setMessages([
       {
         type: 'ai',
-        content: '好的，让我们重新开始！\n\n请告诉我，你想写一本什么样的小说？',
+        content: '🔄 好的！让我们重新来过！\n\n💪 带上你的新脑洞，我们再搞个大的！\n\n告诉我你这次想创造什么奇迹？',
       }
     ]);
     setWizardData({});

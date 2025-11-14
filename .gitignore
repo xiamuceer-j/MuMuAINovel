@@ -107,3 +107,19 @@ docs/
 data_old/
 backend/migrate_all_databases.py
 test_api.py
+
+# AI模型文件
+backend/embedding/
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+*.h5
+*.pth
+*.pt
+*.ckpt
+*.pkl
+*.pickle
+
+# MCP相关
+.mcp/

@@ -93,7 +93,8 @@ const Inspiration: React.FC = () => {
     try {
       const response = await inspirationApi.generateOptions({
         step: lastFailedRequest.step,
-        context: lastFailedRequest.context
+        context: lastFailedRequest.context,
+        user_feedback: ""  // 重试时不传递用户反馈
       });
 
       if (response.error) {
@@ -151,7 +152,8 @@ const Inspiration: React.FC = () => {
       if (currentStep === 'idea') {
         const requestData = {
           step: 'title' as const,
-          context: { idea: userInput }
+          context: { idea: userInput },
+          user_feedback: ""  // 初始生成时不传递用户反馈
         };
 
         const response = await inspirationApi.generateOptions(requestData);
@@ -319,10 +321,11 @@ const Inspiration: React.FC = () => {
 
       // 用户自定义输入时，重新生成当前步骤的选项（不进入下一步）
       if (currentStep === 'title') {
-        // 重新生成标题选项
+        // 重新生成标题选项，传递用户反馈
         const requestData = {
           step: 'title' as const,
-          context: { idea: wizardData.idea || updatedData.idea }
+          context: { idea: wizardData.idea || updatedData.idea },
+          user_feedback: input  // 传递用户反馈
         };
 
         const response = await inspirationApi.generateOptions(requestData);
@@ -348,10 +351,11 @@ const Inspiration: React.FC = () => {
         setMessages(prev => [...prev, aiMessage]);
         setLastFailedRequest(null);
       } else if (currentStep === 'description') {
-        // 重新生成简介选项
+        // 重新生成简介选项，传递用户反馈
         const requestData = {
           step: 'description' as const,
-          context: { idea: wizardData.idea, title: wizardData.title }
+          context: { idea: wizardData.idea, title: wizardData.title },
+          user_feedback: input  // 传递用户反馈
         };
 
         const response = await inspirationApi.generateOptions(requestData);
@@ -377,10 +381,11 @@ const Inspiration: React.FC = () => {
         setMessages(prev => [...prev, aiMessage]);
         setLastFailedRequest(null);
       } else if (currentStep === 'theme') {
-        // 重新生成主题选项
+        // 重新生成主题选项，传递用户反馈
         const requestData = {
           step: 'theme' as const,
-          context: { idea: wizardData.idea, title: wizardData.title, description: wizardData.description }
+          context: { idea: wizardData.idea, title: wizardData.title, description: wizardData.description },
+          user_feedback: input  // 传递用户反馈
         };
 
         const response = await inspirationApi.generateOptions(requestData);
@@ -406,10 +411,11 @@ const Inspiration: React.FC = () => {
         setMessages(prev => [...prev, aiMessage]);
         setLastFailedRequest(null);
       } else if (currentStep === 'genre') {
-        // 重新生成类型选项
+        // 重新生成类型选项，传递用户反馈
         const requestData = {
           step: 'genre' as const,
-          context: { idea: wizardData.idea, title: wizardData.title, description: wizardData.description, theme: wizardData.theme }
+          context: { idea: wizardData.idea, title: wizardData.title, description: wizardData.description, theme: wizardData.theme },
+          user_feedback: input  // 传递用户反馈
         };
 
         const response = await inspirationApi.generateOptions(requestData);
@@ -618,7 +624,8 @@ const Inspiration: React.FC = () => {
     if (nextStep === 'description') {
       const requestData = {
         step: 'description' as const,
-        context: { idea: wizardData.idea, title: data.title }
+        context: { idea: wizardData.idea, title: data.title },
+        user_feedback: ""  // 下一步骤不传递用户反馈
       };
       const response = await inspirationApi.generateOptions(requestData);
 
@@ -648,7 +655,8 @@ const Inspiration: React.FC = () => {
     } else if (nextStep === 'theme') {
       const requestData = {
         step: 'theme' as const,
-        context: { title: data.title, description: data.description }
+        context: { title: data.title, description: data.description },
+        user_feedback: ""  // 下一步骤不传递用户反馈
       };
       const response = await inspirationApi.generateOptions(requestData);
 
@@ -682,7 +690,8 @@ const Inspiration: React.FC = () => {
           title: data.title,
           description: data.description,
           theme: data.theme
-        }
+        },
+        user_feedback: ""  // 下一步骤不传递用户反馈
       };
       const response = await inspirationApi.generateOptions(requestData);
 

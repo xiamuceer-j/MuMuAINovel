@@ -416,6 +416,7 @@ export const inspirationApi = {
       description?: string;
       theme?: string;
     };
+    user_feedback?: string;  // 新增：用户反馈字段
   }) =>
     api.post<unknown, {
       prompt?: string;

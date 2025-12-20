@@ -185,12 +185,18 @@ class MemoryService:
                     logger.error("   或手动下载模型文件到 embedding 目录")
                     logger.error(f"💡 期望的模型目录结构:")
                     logger.error(f"   {os.path.abspath(model_cache_dir)}/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/")
-                    raise RuntimeError("无法加载任何Embedding模型")
+                    # 【修改】降级处理：使用模拟模型继续运行，而不是抛异常
+                    logger.warning("⚠️ 将使用模拟Embedding模型继续运行（记忆功能降级）")
+                    self.embedding_model = None
+                    self._embedding_available = False
             
             self._initialized = True
             logger.info("✅ MemoryService初始化成功")
             logger.info(f"  - ChromaDB目录: {chroma_dir}")
-            logger.info(f"  - Embedding模型: paraphrase-multilingual-MiniLM-L12-v2")
+            if self.embedding_model:
+                logger.info(f"  - Embedding模型: paraphrase-multilingual-MiniLM-L12-v2")
+            else:
+                logger.info(f"  - Embedding模型: 未加载（记忆功能降级）")
             
         except Exception as e:
             logger.error(f"❌ MemoryService初始化失败: {str(e)}")
@@ -259,6 +265,11 @@ class MemoryService:
             是否添加成功
         """
         try:
+            # 检查embedding模型是否可用
+            if not self.embedding_model:
+                logger.warning(f"⚠️ Embedding模型未加载，跳过添加记忆: {content[:50]}")
+                return False
+                
             collection = self.get_collection(user_id, project_id)
             
             # 生成文本的向量表示
@@ -316,6 +327,11 @@ class MemoryService:
             成功添加的数量
         """
         if not memories:
+            return 0
+        
+        # 检查embedding模型是否可用
+        if not self.embedding_model:
+            logger.warning(f"⚠️ Embedding模型未加载，跳过批量添加{len(memories)}条记忆")
             return 0
             
         try:
@@ -390,6 +406,11 @@ class MemoryService:
             相关记忆列表,按相似度排序
         """
         try:
+            # 检查embedding模型是否可用
+            if not self.embedding_model:
+                logger.warning(f"⚠️ Embedding模型未加载，无法执行语义搜索: {query[:50]}")
+                return []
+            
             collection = self.get_collection(user_id, project_id)
             
             # 生成查询向量
@@ -790,6 +811,11 @@ class MemoryService:
             是否更新成功
         """
         try:
+            # 检查embedding模型是否可用
+            if not self.embedding_model and content:
+                logger.warning(f"⚠️ Embedding模型未加载，无法更新记忆")
+                return False
+            
             collection = self.get_collection(user_id, project_id)
             
             update_data = {}

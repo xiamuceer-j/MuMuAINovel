@@ -123,6 +123,8 @@ async def db_session_stats():
     """
     数据库会话统计（监控连接泄漏）
     
+    ✅ 改进版本：使用 get_session_health_report() 获取详细的健康状态
+    
     返回：
     - created: 总创建会话数
     - closed: 总关闭会话数
@@ -130,20 +132,53 @@ async def db_session_stats():
     - errors: 错误次数
     - generator_exits: SSE断开次数
     - last_check: 最后检查时间
+    - leakage_risk: 是否存在泄漏风险（活跃会话数超过泄漏阈值）
+    - health_status: 健康状态（"正常"或"警告"）
     """
+    from app.database import get_session_health_report
+    
+    health_report = get_session_health_report()
+    
     return {
         "status": "ok",
-        "session_stats": _session_stats,
-        "warning": "活跃会话数过多" if _session_stats["active"] > 10 else None
+        **health_report,
+        "warning": "活跃会话数过多，可能存在泄漏" if health_report["leakage_risk"] else None,
+        "recommendations": _get_session_recommendations(health_report)
     }
+
+
+def _get_session_recommendations(health_report: dict) -> list:
+    """根据健康报告返回改善建议
+    
+    Args:
+        health_report: get_session_health_report() 的返回值
+        
+    Returns:
+        list: 改善建议列表
+    """
+    recommendations = []
+    
+    if health_report["leakage_risk"]:
+        recommendations.append("🚨 检测到会话泄漏风险，建议立即检查应用日志和代码")
+    elif health_report["health_status"] == "警告":
+        recommendations.append("⚠️ 活跃会话数接近限制，建议优化数据库操作或增加连接池大小")
+    else:
+        recommendations.append("✅ 数据库会话健康状态良好")
+    
+    if health_report.get("errors", 0) > 10:
+        recommendations.append("⚠️ 检测到多个数据库错误，建议检查应用日志")
+    
+    if health_report.get("generator_exits", 0) > 20:
+        recommendations.append("⚠️ SSE连接断开频繁，检查网络连接或客户端实现")
+    
+    return recommendations
 
 
 from app.api import (
     projects, outlines, characters, chapters,
     wizard_stream, relationships, organizations,
     auth, users, settings, writing_styles, memories,
-    mcp_plugins, admin, inspiration, prompt_templates,
-    changelog
+    mcp_plugins, admin, inspiration
 )
 
 app.include_router(auth.router, prefix="/api")
@@ -162,8 +197,6 @@ app.include_router(organizations.router, prefix="/api")
 app.include_router(writing_styles.router, prefix="/api")
 app.include_router(memories.router)  # 记忆管理API (已包含/api前缀)
 app.include_router(mcp_plugins.router, prefix="/api")  # MCP插件管理API
-app.include_router(prompt_templates.router, prefix="/api")  # 提示词模板管理API
-app.include_router(changelog.router, prefix="/api")  # 更新日志API
 
 static_dir = Path(__file__).parent.parent / "static"
 if static_dir.exists():

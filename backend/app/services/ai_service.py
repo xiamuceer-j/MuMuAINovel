@@ -1090,12 +1090,14 @@ class AIService:
     @staticmethod
     def _clean_json_response(text: str) -> str:
         """
-        清洗 AI 返回的 JSON 响应
+        清洗 AI 返回的 JSON 响应（增强版）
         
-        去除常见的格式问题：
+        修复常见的格式问题：
         - markdown 代码块标记 (```json ```)
         - 前后空白字符
-        - 注释文字
+        - 未转义的引号（中文引号）
+        - 多余的逗号
+        - 不完整的 JSON 结构
         
         Args:
             text: AI 返回的原始文本
@@ -1114,6 +1116,11 @@ class AIService:
         # 去除前后空白
         text = text.strip()
         
+        # 【新增】修复常见的中文引号问题
+        # 将中文左右双引号替换为英文引号（用于字符串值中）
+        text = text.replace('"', '"').replace('"', '"')
+        text = text.replace(''', "'").replace(''', "'")
+        
         # 尝试提取第一个完整的 JSON 对象或数组
         # 查找第一个 { 或 [
         start_idx = -1
@@ -1128,7 +1135,7 @@ class AIService:
         # 从第一个括号开始提取
         text = text[start_idx:]
         
-        # 查找匹配的结束括号
+        # 查找匹配的结束括号（改进版：处理未转义引号）
         bracket_stack = []
         end_idx = -1
         in_string = False
@@ -1166,9 +1173,42 @@ class AIService:
                         break
         
         if end_idx > 0:
-            return text[:end_idx]
+            result = text[:end_idx]
+        else:
+            # 【新增】如果找不到完整的 JSON，尝试修复不完整的结构
+            result = text
+            # 补充缺失的闭合括号
+            bracket_stack_copy = []
+            in_string = False
+            escape_next = False
+            for char in result:
+                if escape_next:
+                    escape_next = False
+                    continue
+                if char == '\\':
+                    escape_next = True
+                    continue
+                if char == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if char in ('{', '['):
+                    bracket_stack_copy.append(char)
+                elif char == '}':
+                    if bracket_stack_copy and bracket_stack_copy[-1] == '{':
+                        bracket_stack_copy.pop()
+                elif char == ']':
+                    if bracket_stack_copy and bracket_stack_copy[-1] == '[':
+                        bracket_stack_copy.pop()
+            
+            # 补充缺失的闭合括号
+            while bracket_stack_copy:
+                closing = '}' if bracket_stack_copy[-1] == '{' else ']'
+                result += closing
+                bracket_stack_copy.pop()
         
-        return text
+        return result
     
     @staticmethod
     def _add_json_format_hint(original_prompt: str, failed_response: str, attempt: int) -> str:

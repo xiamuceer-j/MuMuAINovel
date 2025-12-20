@@ -110,7 +110,7 @@ class PlotAnalyzer:
     
     def _parse_analysis_response(self, response: str) -> Optional[Dict[str, Any]]:
         """
-        解析AI返回的分析结果（使用统一的JSON清洗方法）
+        解析AI返回的分析结果（增强版：带自动修复机制）
         
         Args:
             response: AI返回的文本
@@ -123,7 +123,26 @@ class PlotAnalyzer:
             cleaned = self.ai_service._clean_json_response(response)
             
             # 尝试解析JSON
-            result = json.loads(cleaned)
+            try:
+                result = json.loads(cleaned)
+            except json.JSONDecodeError as initial_error:
+                # 【新增】第一次失败后尝试自动修复
+                logger.warning(f"⚠️ JSON首次解析失败，尝试自动修复: {str(initial_error)}")
+                
+                fixed = self._try_fix_json(cleaned)
+                if fixed != cleaned:
+                    logger.info(f"🔧 已应用JSON自动修复，重新解析...")
+                    try:
+                        result = json.loads(fixed)
+                        logger.info(f"✅ 自动修复成功！")
+                    except json.JSONDecodeError as retry_error:
+                        # 修复也失败了
+                        logger.error(f"❌ 修复后仍然解析失败: {str(retry_error)}")
+                        logger.error(f"  清洗后的内容: {cleaned[:300]}")
+                        return None
+                else:
+                    # 无法进一步修复
+                    raise initial_error
             
             # 验证必要字段
             required_fields = ['hooks', 'plot_points', 'scores']
@@ -142,6 +161,88 @@ class PlotAnalyzer:
         except Exception as e:
             logger.error(f"❌ 解析异常: {str(e)}")
             return None
+    
+    def _try_fix_json(self, text: str) -> str:
+        """
+        尝试修复常见的JSON格式错误
+        
+        修复策略：
+        1. 移除行末注释
+        2. 修复未转义的引号
+        3. 修复多余的逗号
+        4. 修复缺失的逗号
+        
+        Args:
+            text: 有问题的JSON字符串
+        
+        Returns:
+            修复后的JSON字符串
+        """
+        # 策略1：移除 JSON 中的注释（// 或 /* */）
+        text = re.sub(r'//.*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+        
+        # 策略2：修复末尾多余的逗号（在 } 或 ] 之前的逗号）
+        text = re.sub(r',(\s*[}\]])', r'\1', text)
+        
+        # 策略3：尝试修复在中文字符后多出的引号
+        # 例如："他是一个好人"他妈" 应该是 "他是一个好人他妈"
+        # 这个比较复杂，我们用更激进的方法：
+        # 查找不匹配的引号并尝试修复
+        
+        lines = text.split('\n')
+        fixed_lines = []
+        
+        for line in lines:
+            # 跳过纯注释行
+            if line.strip().startswith('//') or line.strip().startswith('#'):
+                continue
+            
+            # 修复行内的引号问题
+            fixed_line = self._fix_line_quotes(line)
+            fixed_lines.append(fixed_line)
+        
+        text = '\n'.join(fixed_lines)
+        return text
+    
+    def _fix_line_quotes(self, line: str) -> str:
+        """
+        修复单行中的引号问题
+        
+        Args:
+            line: 单行字符串
+        
+        Returns:
+            修复后的字符串
+        """
+        # 如果这行不包含冒号，可能不是键值对，跳过
+        if ':' not in line:
+            return line
+        
+        # 查找键值部分
+        match = re.search(r':\s*"', line)
+        if not match:
+            return line
+        
+        # 找到值的开始位置
+        value_start = match.end() - 1
+        
+        # 计数该行中 " 的个数
+        quote_count = line.count('"')
+        
+        # 如果引号数是奇数，说明有未闭合的引号
+        if quote_count % 2 == 1:
+            # 尝试移除最后一个不必要的引号
+            # 找到最后一个引号
+            last_quote_idx = line.rfind('"')
+            if last_quote_idx > value_start:
+                # 检查这个引号后面是什么（应该是逗号或括号）
+                after_quote = line[last_quote_idx + 1:].strip()
+                if after_quote and not after_quote.startswith(',') and not after_quote.startswith('}') and not after_quote.startswith(']'):
+                    # 这个引号可能是多余的，移除它
+                    line = line[:last_quote_idx] + line[last_quote_idx + 1:]
+        
+        return line
     
     def extract_memories_from_analysis(
         self,

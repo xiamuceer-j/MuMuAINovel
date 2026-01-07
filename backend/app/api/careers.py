@@ -266,38 +266,55 @@ async def generate_career_system(
 3. 如果已有职业较少，可以生成核心基础职业
 4. 如果已有职业较多，可以生成特色化、专精化的职业
 
-返回JSON格式，结构如下：
+<output priority="P0">
+【输出格式】
+返回纯JSON对象：
 
 {{
-  "main_careers": [
-    {{
-      "name": "职业名称",
-      "description": "职业描述",
-      "category": "职业分类（如：战斗系、法术系等）",
-      "stages": [
-        {{"level": 1, "name": "阶段名称", "description": "阶段描述"}},
-        {{"level": 2, "name": "阶段名称", "description": "阶段描述"}},
-        ...
-      ],
-      "max_stage": 10,
-      "requirements": "职业要求",
-      "special_abilities": "特殊能力",
-      "worldview_rules": "世界观规则关联",
-      "attribute_bonuses": {{"strength": "+10%", "intelligence": "+5%"}}
-    }}
+"main_careers": [
+{{
+  "name": "职业名称",
+  "description": "职业描述（100-150字）",
+  "category": "职业分类",
+  "stages": [
+    {{"level": 1, "name": "阶段1名称", "description": "阶段描述"}},
+    {{"level": 2, "name": "阶段2名称", "description": "阶段描述"}}
   ],
-  "sub_careers": [
-    {{
-      "name": "副职业名称",
-      "description": "职业描述",
-      "category": "生产系/辅助系/特殊系",
-      "stages": [...],
-      "max_stage": 5,
-      "requirements": "职业要求",
-      "special_abilities": "特殊能力"
-    }}
-  ]
+  "max_stage": 整数,
+  "requirements": "职业要求和前置条件",
+  "special_abilities": "职业特殊能力",
+  "worldview_rules": "与世界观规则的关联",
+  "attribute_bonuses": {{"strength": "+10%"}}
 }}
+],
+"sub_careers": [
+{{
+  "name": "副职业名称",
+  "description": "职业描述（80-120字）",
+  "category": "生产系/辅助系/特殊系",
+  "stages": [
+    {{"level": 1, "name": "阶段1名称", "description": "阶段描述"}}
+  ],
+  "max_stage": 整数,
+  "requirements": "职业要求",
+  "special_abilities": "特殊能力"
+}}
+]
+}}
+</output>
+
+<constraints>
+【必须遵守】
+✅ 主职业阶段数建议：5-15个
+✅ 副职业阶段数建议：3-10个
+✅ stages数组长度必须等于max_stage
+✅ 确保职业体系与世界观高度契合
+
+【禁止事项】
+❌ 所有职业使用相同的阶段数
+❌ 输出markdown标记
+❌ 职业设计与世界观脱节
+</constraints>
 
 注意事项：
 1. **避免重复**：生成的职业名称和定位不能与已有职业重复

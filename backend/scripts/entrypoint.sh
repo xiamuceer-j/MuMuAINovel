@@ -10,7 +10,7 @@ if [ -z "$APP_VERSION" ]; then
     if [ -f "/app/.env.example" ]; then
         APP_VERSION=$(grep "^APP_VERSION=" /app/.env.example | cut -d '=' -f2)
     fi
-    APP_VERSION="${APP_VERSION:-1.0.0}"
+    APP_VERSION="${APP_VERSION:-1.2.8}"
 fi
 
 if [ -z "$APP_NAME" ]; then

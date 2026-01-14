@@ -174,12 +174,12 @@ docker-compose up -d
 >
 > 1. **`.env` 文件挂载**: `docker-compose.yml` 会自动将 `.env` 挂载到容器，确保文件存在
 > 2. **数据库初始化**: `init_postgres.sql` 会在首次启动时自动执行，安装必要的PostgreSQL扩展
-> 3. **自行构建**: 如需从源码构建，请先下载 embedding 模型文件（[加群获取](frontend/public/qq.jpg)）
+> 3. **Embedding 模型**: 默认首次启动会自动从 HuggingFace 下载（约 400MB）并缓存；离线环境可提前手动准备模型文件
 
 ### 使用 Docker Hub 镜像（推荐新手）
 
 ```bash
-# 1. 拉取最新镜像（已包含模型文件）
+# 1. 拉取最新镜像（首次启动会自动下载 embedding 模型并缓存）
 docker pull mumujie/mumuainovel:latest
 
 # 2. 创建 docker-compose.yml（点击下方展开查看完整配置）
@@ -251,10 +251,12 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
+      # Embedding 模型缓存（首次可自动下载，后续复用；不增加镜像体积）
+      - embedding_cache:/app/embedding
     environment:
       # 应用配置
       - APP_NAME=${APP_NAME:-MuMuAINovel}
-      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - APP_VERSION=${APP_VERSION:-1.2.8}
       - APP_HOST=${APP_HOST:-0.0.0.0}
       - APP_PORT=8000
       - DEBUG=${DEBUG:-false}
@@ -311,6 +313,8 @@ services:
 volumes:
   postgres_data:
     driver: local
+  embedding_cache:
+    driver: local
 
 networks:
   ai-story-network:
@@ -331,21 +335,19 @@ docker-compose pull
 docker-compose up -d
 ```
 
-> **💡 提示**: Docker Hub 镜像已包含所有依赖和模型文件，无需额外下载
+> **💡 提示**: 首次启动会自动下载 embedding 模型并缓存到 `embedding_cache` 卷，后续启动无需重复下载
 
 ### 本地开发 / 从源码构建
 
 #### 前置准备
 
 ```bash
-# ⚠️ 重要：如果从源码构建，需要先下载 embedding 模型文件
-# 模型文件较大（约 400MB），需放置到以下目录：
-# backend/embedding/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/
-#
-# 📥 获取方式：
-# - 加入项目 QQ 群或 Linux DO 讨论区获取下载链接
-# - 群号：见项目主页
-# - Linux DO：https://linux.do/t/topic/1100112
+# Embedding 模型（约 400MB）默认会在首次启动时从 HuggingFace 自动下载，
+# 并缓存到容器内的 /app/embedding（建议用 volume 挂载，docker-compose 已配置 embedding_cache）。
+# 如果你需要离线部署，可提前把模型放到 backend/embedding/... 并在运行时设置：
+#   TRANSFORMERS_OFFLINE=1
+#   HF_DATASETS_OFFLINE=1
+#   HF_HUB_OFFLINE=1
 ```
 
 #### 后端

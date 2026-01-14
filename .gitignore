@@ -100,7 +100,8 @@ htmlcov/
 dmypy.json
 
 # Local test & backup files
-.github/
+.github/copilot-instructions.md
+diagnostics/
 DATABASE_BACKUP_GUIDE.md
 backend/embedding/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/embedding.zip
 backups/

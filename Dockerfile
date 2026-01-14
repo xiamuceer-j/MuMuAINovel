@@ -64,7 +64,7 @@ COPY backend/scripts/migrate.py ./scripts/migrate.py
 RUN chmod +x /app/entrypoint.sh
 
 # 创建必要的目录
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p /app/data /app/logs /app/embedding
 
 # 暴露端口
 EXPOSE 8000
@@ -74,10 +74,14 @@ ENV PYTHONUNBUFFERED=1
 ENV APP_HOST=0.0.0.0
 ENV APP_PORT=8000
 
-# 设置Transformers和Sentence-Transformers离线模式
-ENV TRANSFORMERS_OFFLINE=1
-ENV HF_DATASETS_OFFLINE=1
-ENV HF_HUB_OFFLINE=1
+# Transformers/Sentence-Transformers 默认允许联网下载（首次启动会缓存到 /app/embedding）
+# 如需强制离线运行，可在 docker-compose/.env 中设置：
+#   TRANSFORMERS_OFFLINE=1
+#   HF_DATASETS_OFFLINE=1
+#   HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=0
+ENV HF_DATASETS_OFFLINE=0
+ENV HF_HUB_OFFLINE=0
 ENV SENTENCE_TRANSFORMERS_HOME=/app/embedding
 
 # 健康检查

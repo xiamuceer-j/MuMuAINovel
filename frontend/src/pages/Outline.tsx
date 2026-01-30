@@ -1,13 +1,14 @@
 ﻿import { useState, useEffect } from 'react';
 import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs } from 'antd';
-import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined, FormOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useOutlineSync } from '../store/hooks';
 import { cardStyles } from '../components/CardStyles';
 import { SSEPostClient } from '../utils/sseClient';
 import { SSEProgressModal } from '../components/SSEProgressModal';
+import ExpansionPlanEditor from '../components/ExpansionPlanEditor';
 import { outlineApi, chapterApi, projectApi } from '../services/api';
-import type { OutlineExpansionResponse, BatchOutlineExpansionResponse, ChapterPlanItem, ApiError } from '../types';
+import type { OutlineExpansionResponse, BatchOutlineExpansionResponse, ChapterPlanItem, ApiError, ExpansionPlanData } from '../types';
 
 // 角色预测数据类型
 interface PredictedCharacter {
@@ -141,6 +142,11 @@ export default function Outline() {
   const [sseProgress, setSSEProgress] = useState(0);
   const [sseMessage, setSSEMessage] = useState('');
   const [sseModalVisible, setSSEModalVisible] = useState(false);
+
+  // 编辑规划的状态
+  const [editingPlanChapterId, setEditingPlanChapterId] = useState<string | null>(null);
+  const [editingPlanData, setEditingPlanData] = useState<ExpansionPlanData | null>(null);
+  const [planEditorVisible, setPlanEditorVisible] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1025,6 +1031,48 @@ export default function Outline() {
     }
   };
 
+  // 打开编辑规划对话框
+  const handleEditExpansionPlan = (chapterId: string, planData: ExpansionPlanData) => {
+    setEditingPlanChapterId(chapterId);
+    setEditingPlanData(planData);
+    setPlanEditorVisible(true);
+    Modal.destroyAll(); // 关闭预览对话框
+  };
+
+  // 保存规划信息
+  const handleSaveExpansionPlan = async (planData: ExpansionPlanData) => {
+    if (!editingPlanChapterId || !currentProject?.id) return;
+
+    try {
+      const response = await fetch(`/api/chapters/${editingPlanChapterId}/expansion-plan`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(planData),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || '更新失败');
+      }
+
+      message.success('规划信息更新成功');
+
+      // 关闭编辑器
+      setPlanEditorVisible(false);
+      setEditingPlanChapterId(null);
+      setEditingPlanData(null);
+
+      // 刷新大纲列表
+      await refreshOutlines();
+    } catch (error: unknown) {
+      const err = error as Error;
+      message.error('保存规划失败：' + (err.message || '未知错误'));
+      throw error;
+    }
+  };
+
   // 显示已存在章节的展开规划
   const showExistingExpansionPreview = (
     outlineTitle: string,
@@ -1274,8 +1322,31 @@ export default function Outline() {
                           ))}
                         </Space>
                       </Card>
-                    )
-                    }
+                    )}
+
+                    {/* 编辑规划按钮 */}
+                    <Button
+                      type="primary"
+                      icon={<FormOutlined />}
+                      onClick={() => {
+                        const chapterId = data.chapters[idx]?.id;
+                        if (chapterId) {
+                          handleEditExpansionPlan(chapterId, {
+                            key_events: plan.key_events,
+                            character_focus: plan.character_focus,
+                            emotional_tone: plan.emotional_tone,
+                            narrative_goal: plan.narrative_goal,
+                            conflict_type: plan.conflict_type,
+                            estimated_words: plan.estimated_words,
+                            scenes: plan.scenes || null
+                          });
+                        }
+                      }}
+                      block
+                      style={{ marginTop: 8 }}
+                    >
+                      编辑此章节规划
+                    </Button>
                   </Space>
                 </div >
               )
@@ -2539,6 +2610,22 @@ export default function Outline() {
           )}
         </div>
       </div>
+
+      {/* 规划编辑器 */}
+      {currentProject && editingPlanChapterId && (
+        <ExpansionPlanEditor
+          visible={planEditorVisible}
+          planData={editingPlanData}
+          chapterSummary={null}
+          projectId={currentProject.id}
+          onSave={handleSaveExpansionPlan}
+          onCancel={() => {
+            setPlanEditorVisible(false);
+            setEditingPlanChapterId(null);
+            setEditingPlanData(null);
+          }}
+        />
+      )}
     </>
   );
 }

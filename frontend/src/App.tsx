@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import ProjectList from './pages/ProjectList';
@@ -22,18 +22,17 @@ import MCPPlugins from './pages/MCPPlugins';
 import UserManagement from './pages/UserManagement';
 import PromptTemplates from './pages/PromptTemplates';
 import Sponsor from './pages/Sponsor';
-// import Polish from './pages/Polish';
 import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppFooter from './components/AppFooter';
 import SpringFestival from './components/SpringFestival';
+import { FeatureBridge } from './theme-plugins/FeatureBridge';
 import './App.css';
 
 function App() {
   return (
     <ConfigProvider locale={zhCN}>
-      {/* 🧧 春节喜庆装饰 */}
       <SpringFestival />
       <BrowserRouter
         future={{
@@ -41,6 +40,7 @@ function App() {
           v7_relativeSplatPath: true,
         }}
       >
+        <FeatureBridge />
         <Routes>
           <Route path="/login" element={<><Login /><AppFooter /></>} />
           <Route path="/auth/callback" element={<AuthCallback />} />
@@ -68,7 +68,6 @@ function App() {
             <Route path="writing-styles" element={<WritingStyles />} />
             <Route path="prompt-workshop" element={<PromptWorkshop />} />
             <Route path="sponsor" element={<Sponsor />} />
-            {/* <Route path="polish" element={<Polish />} /> */}
           </Route>
         </Routes>
       </BrowserRouter>

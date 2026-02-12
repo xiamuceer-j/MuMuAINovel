@@ -1,0 +1,9 @@
+{
+  "id": "dark",
+  "name": "深邃暗色",
+  "description": "深色主题，护眼舒适，适合夜间使用",
+  "version": "1.0.0",
+  "author": "MuMuAI Team",
+  "tags": ["dark", "modern", "night"],
+  "preview": "#70B8C2"
+}

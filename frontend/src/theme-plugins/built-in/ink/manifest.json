@@ -1,0 +1,9 @@
+{
+  "id": "ink",
+  "name": "水墨山水",
+  "description": "传统水墨画风格，黑白灰为主调，简约雅致",
+  "version": "1.0.0",
+  "author": "MuMuAI Team",
+  "tags": ["light", "chinese", "ink", "minimal"],
+  "preview": "#2C3E50"
+}

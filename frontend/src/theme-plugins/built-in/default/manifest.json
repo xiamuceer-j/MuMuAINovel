@@ -1,0 +1,9 @@
+{
+  "id": "default",
+  "name": "天青淡雅",
+  "description": "传统中国风配色，天青色为主调，米汤白为底，墨色为文",
+  "version": "1.0.0",
+  "author": "MuMuAI Team",
+  "tags": ["light", "chinese", "traditional"],
+  "preview": "#4D8088"
+}

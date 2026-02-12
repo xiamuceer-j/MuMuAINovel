@@ -850,6 +850,20 @@ class MCPClientFacade:
         """执行单个工具调用"""
         tool_call_id = tool_call.get("id", "unknown")
         function_name = tool_call["function"]["name"]
+
+        from app.mcp.policy import get_allowed_tools, normalize_tool_name
+        allowed = get_allowed_tools()
+        if allowed is not None:
+            fn = normalize_tool_name(function_name)
+            if fn not in allowed:
+                return {
+                    "tool_call_id": tool_call_id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": "工具不在允许列表",
+                    "success": False,
+                    "error": "tool_not_allowed",
+                }
         
         try:
             # 解析插件名和工具名

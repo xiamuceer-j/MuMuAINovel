@@ -77,6 +77,7 @@ class AIService:
         user_id: Optional[str] = None,
         db_session: Optional[Any] = None,
         enable_mcp: bool = True,
+        allowed_tools: Optional[set[str]] = None,
     ):
         self.api_provider = api_provider or app_settings.default_ai_provider
         self.default_model = default_model or app_settings.default_model
@@ -89,6 +90,7 @@ class AIService:
         self.user_id = user_id
         self.db_session = db_session
         self._enable_mcp = enable_mcp
+        self._allowed_tools = allowed_tools
         self._cached_tools: Optional[List[Dict]] = None
         self._tools_loaded = False
         
@@ -198,7 +200,7 @@ class AIService:
         if self._tools_loaded and not force_refresh:
             if self._cached_tools:
                 logger.debug(f"🔧 使用缓存的MCP工具 ({len(self._cached_tools)}个)")
-            return self._cached_tools
+            return self._filter_tools(self._cached_tools)
         
         try:
             from app.services.mcp_tools_loader import mcp_tools_loader
@@ -216,13 +218,28 @@ class AIService:
             else:
                 logger.debug(f"📭 用户 {self.user_id} 没有可用的MCP工具")
             
-            return self._cached_tools
+            return self._filter_tools(self._cached_tools)
             
         except Exception as e:
             logger.warning(f"⚠️ 加载MCP工具失败: {e}")
             self._tools_loaded = True
             self._cached_tools = None
             return None
+
+    def _filter_tools(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
+        if not tools:
+            return tools
+        if not self._allowed_tools:
+            return tools
+        allowed = self._allowed_tools
+        filtered = []
+        for t in tools:
+            fn = (t.get("function") or {}).get("name")
+            if not fn:
+                continue
+            if fn in allowed:
+                filtered.append(t)
+        return filtered
 
     async def _handle_tool_calls(
         self,
@@ -357,16 +374,22 @@ class AIService:
         if auto_mcp and tools is None:
             tools = await self._prepare_mcp_tools(auto_mcp=auto_mcp)
         
-        prov = self._get_provider(provider)
-        response = await prov.generate(
-            prompt=prompt,
-            model=model or self.default_model,
-            temperature=temperature or self.default_temperature,
-            max_tokens=max_tokens or self.default_max_tokens,
-            system_prompt=system_prompt or self.default_system_prompt,
-            tools=tools,
-            tool_choice=tool_choice,
-        )
+        from app.mcp.policy import set_allowed_tools
+        token = set_allowed_tools(self._allowed_tools)
+        try:
+            prov = self._get_provider(provider)
+            response = await prov.generate(
+                prompt=prompt,
+                model=model or self.default_model,
+                temperature=temperature or self.default_temperature,
+                max_tokens=max_tokens or self.default_max_tokens,
+                system_prompt=system_prompt or self.default_system_prompt,
+                tools=self._filter_tools(tools),
+                tool_choice=tool_choice,
+            )
+        finally:
+            from app.mcp.policy import allowed_tools_var
+            allowed_tools_var.reset(token)
         
         # 处理工具调用
         if handle_tool_calls and response.get("tool_calls"):
@@ -428,17 +451,23 @@ class AIService:
         # 流式生成（Provider 层处理工具调用）
         prov = self._get_provider(provider)
         logger.debug(f"🔧 开始流式生成，provider={provider or self.api_provider}, tools_count={len(tools_to_use) if tools_to_use else 0}")
-        async for chunk in prov.generate_stream(
-            prompt=prompt,
-            model=model or self.default_model,
-            temperature=temperature or self.default_temperature,
-            max_tokens=max_tokens or self.default_max_tokens,
-            system_prompt=system_prompt or self.default_system_prompt,
-            tools=tools_to_use,
-            tool_choice=tool_choice,
-            user_id=self.user_id,
-        ):
-            yield chunk
+        from app.mcp.policy import set_allowed_tools, allowed_tools_var
+        token = set_allowed_tools(self._allowed_tools)
+        try:
+            stream = await prov.generate_stream(
+                prompt=prompt,
+                model=model or self.default_model,
+                temperature=temperature or self.default_temperature,
+                max_tokens=max_tokens or self.default_max_tokens,
+                system_prompt=system_prompt or self.default_system_prompt,
+                tools=self._filter_tools(tools_to_use),
+                tool_choice=tool_choice,
+                user_id=self.user_id,
+            )
+            async for chunk in stream:
+                yield chunk
+        finally:
+            allowed_tools_var.reset(token)
 
     async def call_with_json_retry(
         self,
@@ -542,6 +571,7 @@ def create_user_ai_service_with_mcp(
     db_session,
     system_prompt: Optional[str] = None,
     enable_mcp: bool = True,
+    allowed_tools: Optional[set[str]] = None,
 ) -> AIService:
     """
     创建支持MCP的用户AI服务
@@ -572,4 +602,5 @@ def create_user_ai_service_with_mcp(
         user_id=user_id,
         db_session=db_session,
         enable_mcp=enable_mcp,
+        allowed_tools=allowed_tools,
     )

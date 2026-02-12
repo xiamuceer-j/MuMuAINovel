@@ -4,6 +4,8 @@ import { SaveOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined, Check
 import { settingsApi, mcpPluginApi } from '../services/api';
 import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig } from '../types';
 import { eventBus, EventNames } from '../store/eventBus';
+import { ThemeSettingsCard } from '../theme-plugins/ThemeSettingsCard';
+import { SkillSettingsCard } from '../skills/SkillSettingsCard';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -956,6 +958,10 @@ export default function SettingsPage() {
               </Col>
             </Row>
           </Card>
+
+          <ThemeSettingsCard />
+
+          <SkillSettingsCard />
 
           {/* 主内容卡片 */}
           <Card

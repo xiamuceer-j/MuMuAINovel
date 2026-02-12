@@ -96,6 +96,8 @@ print('Model downloaded successfully!'); \
 # 复制后端代码（不包含embedding，因为已经下载了）
 COPY backend/ ./
 
+COPY .opencode/skills ./.opencode/skills
+
 # 从前端构建阶段复制构建好的静态文件
 COPY --from=frontend-builder /frontend/dist ./static
 

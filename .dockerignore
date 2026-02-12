@@ -58,6 +58,8 @@ logs/
 docs/
 *.md
 !README.md
+!.opencode/skills/**
+!.opencode/skills/**/*.md
 
 # 测试
 tests/

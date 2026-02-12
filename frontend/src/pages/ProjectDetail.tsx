@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Outlet, Link, useLocation } from 'react-router-dom';
-import { Layout, Menu, Spin, Button, Drawer } from 'antd';
+import { Layout, Menu, Spin, Button, Drawer, Modal, Select, Space, Typography, message } from 'antd';
 import {
   ArrowLeftOutlined,
   FileTextOutlined,
@@ -18,12 +18,15 @@ import {
   TrophyOutlined,
   BulbOutlined,
   CloudOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useCharacterSync, useOutlineSync, useChapterSync } from '../store/hooks';
-import { projectApi } from '../services/api';
+import { projectApi, skillsApi } from '../services/api';
+import type { SkillSpecResponse } from '../types';
 
 const { Header, Sider, Content } = Layout;
+const { Text } = Typography;
 
 // 判断是否为移动端
 const isMobile = () => window.innerWidth <= 768;
@@ -35,6 +38,10 @@ export default function ProjectDetail() {
   const [collapsed, setCollapsed] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [mobile, setMobile] = useState(isMobile());
+
+  const [skillModalOpen, setSkillModalOpen] = useState(false);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skills, setSkills] = useState<SkillSpecResponse[]>([]);
 
   // 监听窗口大小变化
   useEffect(() => {
@@ -92,6 +99,38 @@ export default function ProjectDetail() {
       clearProjectData();
     };
   }, [projectId, clearProjectData, setLoading, setCurrentProject, refreshOutlines, refreshCharacters, refreshChapters]);
+
+  const activeProjectSkillKey = currentProject?.active_skill_key ?? null;
+
+  const loadSkills = async () => {
+    setSkillsLoading(true);
+    try {
+      const res = await skillsApi.list();
+      setSkills(res.items || []);
+    } finally {
+      setSkillsLoading(false);
+    }
+  };
+
+  const openSkillModal = async () => {
+    setSkillModalOpen(true);
+    if (!skills.length) {
+      await loadSkills();
+    }
+  };
+
+  const updateProjectSkill = async (next: string) => {
+    if (!projectId) return;
+    const nextKey = next === '__none__' ? null : next;
+    setSkillsLoading(true);
+    try {
+      const updated = await projectApi.updateProject(projectId, { active_skill_key: nextKey });
+      setCurrentProject(updated);
+      message.success(nextKey ? '已设置项目技能（覆盖用户技能）' : '已清空项目技能（回退到用户技能）');
+    } finally {
+      setSkillsLoading(false);
+    }
+  };
 
   // 移除事件监听，避免无限循环
   // Hook 内部已经更新了 store，不需要再次刷新
@@ -350,9 +389,50 @@ export default function ProjectDetail() {
                 </div>
               ))}
             </div>
+
+            <Button
+              icon={<SettingOutlined />}
+              onClick={openSkillModal}
+              style={{
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.35)',
+                background: 'rgba(255, 255, 255, 0.12)',
+              }}
+            >
+              项目技能
+            </Button>
           </div>
         )}
       </Header>
+
+      <Modal
+        title="项目技能（覆盖用户技能）"
+        open={skillModalOpen}
+        onCancel={() => setSkillModalOpen(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Select
+            value={activeProjectSkillKey ?? '__none__'}
+            onChange={updateProjectSkill}
+            loading={skillsLoading}
+            style={{ width: '100%' }}
+            options={[
+              { value: '__none__', label: '不设置（使用用户技能）' },
+              ...skills.map((s) => ({ value: s.skill_key, label: s.name })),
+            ]}
+            showSearch
+            optionFilterProp="label"
+          />
+          <Text type="secondary">
+            设置后，该项目下的 AI 调用会优先使用项目技能；如不设置，将回退使用“设置页”中的用户技能。
+          </Text>
+          <Text type="secondary">
+            技能列表来自技能规范同步结果（.opencode/skills）。如果看不到新技能，请先在“设置-技能”中点击同步。
+          </Text>
+        </Space>
+      </Modal>
 
       <Layout style={{ marginTop: mobile ? 56 : 70 }}>
         {mobile ? (

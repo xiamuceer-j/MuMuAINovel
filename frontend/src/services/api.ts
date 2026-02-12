@@ -50,6 +50,7 @@ import type {
   PresetUpdateRequest,
   PresetListResponse,
   ChapterPlanItem,
+  SkillListResponse,
 } from '../types';
 
 interface MCPPluginSimpleCreate {
@@ -274,6 +275,12 @@ export const settingsApi = {
     api.post<unknown, APIKeyPreset>('/settings/presets/from-current', null, {
       params: { name, description }
     }),
+};
+
+export const skillsApi = {
+  sync: () => api.post<unknown, { discovered: number; upserted: number; skipped: number; errors: number; error_messages: string[] }>('/skills/sync'),
+  list: () => api.get<unknown, SkillListResponse>('/skills'),
+  activate: (skillKey: string | null) => api.post('/skills/activate', { skill_key: skillKey }),
 };
 
 export const projectApi = {

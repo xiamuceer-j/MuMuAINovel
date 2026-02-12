@@ -38,6 +38,23 @@ export interface SettingsUpdate {
   preferences?: string;
 }
 
+export interface SkillSpecResponse {
+  skill_key: string;
+  name: string;
+  description?: string;
+  allowed_tools?: string;
+  api_provider_override?: string;
+  model_override?: string;
+  temperature_override?: string;
+  max_tokens_override?: string;
+  is_builtin?: boolean;
+  updated_at?: string;
+}
+
+export interface SkillListResponse {
+  items: SkillSpecResponse[];
+}
+
 // API预设相关类型定义
 export interface APIKeyPresetConfig {
   api_provider: string;
@@ -102,6 +119,7 @@ export interface Project {
   chapter_count?: number;
   narrative_perspective?: string;
   character_count?: number;
+  active_skill_key?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -135,6 +153,7 @@ export interface ProjectUpdate {
   chapter_count?: number;
   narrative_perspective?: string;
   character_count?: number;
+  active_skill_key?: string | null;
   // current_words 由章节内容自动计算，不在此接口中
 }
 

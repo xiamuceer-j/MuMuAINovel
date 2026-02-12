@@ -32,6 +32,7 @@ class Project(Base):
     chapter_count = Column(Integer, comment="章节数量")
     narrative_perspective = Column(String(50), comment="叙事视角：first_person/third_person/omniscient")
     character_count = Column(Integer, default=5, comment="角色数量")
+    active_skill_key = Column(String(64), nullable=True, comment="项目级技能")
     
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")

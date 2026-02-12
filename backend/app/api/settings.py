@@ -23,6 +23,8 @@ from app.user_manager import User
 from app.logger import get_logger
 from app.config import settings as app_settings, PROJECT_ROOT
 from app.services.ai_service import AIService, create_user_ai_service, create_user_ai_service_with_mcp
+from app.services.skills_service import parse_preferences
+from app.services.skill_policy import parse_allowed_tools_csv
 
 logger = get_logger(__name__)
 
@@ -49,6 +51,7 @@ def require_login(request: Request):
 
 
 async def get_user_ai_service(
+    request: Request,
     user: User = Depends(require_login),
     db: AsyncSession = Depends(get_db)
 ) -> AIService:
@@ -95,17 +98,115 @@ async def get_user_ai_service(
     
     # ✅ 使用支持MCP的工厂函数创建AI服务实例
     # 传递 user_id 和 db_session，使得 AIService 能够自动加载用户配置的MCP工具
+    final_system_prompt = settings.system_prompt
+    allowed_tools: set[str] | None = None
+
+    # 项目级技能（优先级高于用户技能）
+    project_skill = None
+    try:
+        project_id = None
+        if hasattr(request, "path_params"):
+            project_id = request.path_params.get("project_id")
+        if isinstance(project_id, str) and project_id:
+            from app.models.project import Project
+            project_result = await db.execute(
+                select(Project).where(Project.id == project_id, Project.user_id == user.user_id)
+            )
+            project = project_result.scalar_one_or_none()
+            if project and project.active_skill_key:
+                from app.models.skill_spec import SkillSpec
+                ps = await db.execute(select(SkillSpec).where(SkillSpec.skill_key == project.active_skill_key))
+                project_skill = ps.scalar_one_or_none()
+    except Exception as e:
+        logger.warning(f"用户 {user.user_id} 解析项目级技能失败: {e}")
+    user_skill = None
+    try:
+        prefs = parse_preferences(settings.preferences)
+        active_skill_key = prefs.get("active_skill_key")
+        if isinstance(active_skill_key, str) and active_skill_key:
+            from app.models.skill_spec import SkillSpec
+            skill_result = await db.execute(select(SkillSpec).where(SkillSpec.skill_key == active_skill_key))
+            user_skill = skill_result.scalar_one_or_none()
+    except Exception as e:
+        logger.warning(f"用户 {user.user_id} 读取用户技能失败: {e}")
+
+    # 叠加提示词（Settings -> 用户技能 -> 项目技能）
+    def append_skill_prompt(base_prompt: str | None, skill_obj) -> str | None:
+        if not skill_obj or not getattr(skill_obj, "content", None):
+            return base_prompt
+        base = (base_prompt or "").strip()
+        block = f"\n\n# 技能：{skill_obj.name}\n{skill_obj.content.strip()}\n"
+        return (base + block) if base else block.strip()
+
+    final_system_prompt = append_skill_prompt(final_system_prompt, user_skill)
+    final_system_prompt = append_skill_prompt(final_system_prompt, project_skill)
+
+    # allowed-tools（取交集，None 表示不限制）
+    def apply_allowed_tools(current: set[str] | None, skill_obj) -> set[str] | None:
+        if not skill_obj:
+            return current
+        names = parse_allowed_tools_csv(getattr(skill_obj, "allowed_tools", None))
+        if names is None:
+            return current
+        return names if current is None else (current & names)
+
+    allowed_tools = apply_allowed_tools(allowed_tools, user_skill)
+    allowed_tools = apply_allowed_tools(allowed_tools, project_skill)
+
+    if allowed_tools is not None:
+        from app.mcp.policy import expand_allowed_tool_names
+        allowed_tools = expand_allowed_tool_names(allowed_tools)
+
+    # 覆盖参数优先级：项目技能 > 用户技能 > settings
+    def pick_override(field: str) -> str | None:
+        for s in [project_skill, user_skill]:
+            if s is None:
+                continue
+            v = getattr(s, field, None)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return None
+
+    api_provider_override = pick_override("api_provider_override")
+    model_override = pick_override("model_override")
+    temperature_override = pick_override("temperature_override")
+    max_tokens_override = pick_override("max_tokens_override")
+
+    def parse_float(text: str | None) -> float | None:
+        if not text:
+            return None
+        try:
+            return float(text)
+        except Exception:
+            return None
+
+    def parse_int(text: str | None) -> int | None:
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except Exception:
+            return None
+
+    effective_provider = api_provider_override or settings.api_provider
+    effective_model = model_override or settings.llm_model
+    t = parse_float(temperature_override)
+    m = parse_int(max_tokens_override)
+    effective_temperature = t if t is not None else settings.temperature
+    effective_max_tokens = m if m is not None else settings.max_tokens
+
     return create_user_ai_service_with_mcp(
-        api_provider=settings.api_provider,
+        api_provider=effective_provider,
         api_key=settings.api_key,
         api_base_url=settings.api_base_url or "",
-        model_name=settings.llm_model,
-        temperature=settings.temperature,
-        max_tokens=settings.max_tokens,
+        model_name=effective_model,
+        temperature=effective_temperature,
+        max_tokens=effective_max_tokens,
         user_id=user.user_id,          # ✅ 传递 user_id
         db_session=db,                 # ✅ 传递 db_session
-        system_prompt=settings.system_prompt,
+        system_prompt=final_system_prompt,
         enable_mcp=enable_mcp,         # 根据MCP插件状态动态决定
+        allowed_tools=allowed_tools,
     )
 
 

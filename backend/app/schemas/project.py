@@ -38,6 +38,7 @@ class ProjectUpdate(BaseModel):
     chapter_count: Optional[int] = None
     narrative_perspective: Optional[str] = None
     character_count: Optional[int] = None
+    active_skill_key: Optional[str] = None
     # current_words 由章节内容自动计算，不允许手动修改
 
 
@@ -55,7 +56,8 @@ class ProjectResponse(ProjectBase):
     chapter_count: Optional[int] = None
     narrative_perspective: Optional[str] = None
     character_count: Optional[int] = None
-    outline_mode: str  # 显式声明以确保响应中包含
+    active_skill_key: Optional[str] = None
+    outline_mode: Literal["one-to-one", "one-to-many"]
     created_at: datetime
     updated_at: datetime
     

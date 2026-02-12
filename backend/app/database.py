@@ -21,7 +21,9 @@ from app.models import (
     Settings, WritingStyle, ProjectDefaultStyle,
     RelationshipType, CharacterRelationship, Organization, OrganizationMember,
     StoryMemory, PlotAnalysis, AnalysisTask, BatchGenerationTask,
-    RegenerationTask, Career, CharacterCareer, User, MCPPlugin, PromptTemplate
+    RegenerationTask, Career, CharacterCareer, User,
+    MCPPlugin, PromptTemplate,
+    SkillSpec,
 )
 
 # 引擎缓存：每个用户一个引擎

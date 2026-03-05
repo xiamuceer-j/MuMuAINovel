@@ -55,6 +55,7 @@ from app.services.plot_analyzer import PlotAnalyzer
 from app.services.memory_service import memory_service
 from app.services.foreshadow_service import foreshadow_service
 from app.services.chapter_regenerator import ChapterRegenerator
+from app.services.json_helper import NovelContentFilter, clean_novel_content
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
 from app.utils.sse_response import SSEResponse, create_sse_response
@@ -1650,6 +1651,7 @@ async def generate_chapter_content_stream(
                 # === 生成阶段 ===
                 full_content = ""
                 chunk_count = 0
+                content_filter = NovelContentFilter()
                 
                 yield await tracker.generating(
                     current_chars=0,
@@ -1657,25 +1659,51 @@ async def generate_chapter_content_stream(
                 )
                 
                 async for chunk in user_ai_service.generate_text_stream(**generate_kwargs):
-                    full_content += chunk
-                    chunk_count += 1
+                    # 过滤 think/meta 内容（支持跨 chunk 标签）
+                    filtered_chunk = content_filter.filter_chunk(chunk)
                     
-                    # 发送内容块
-                    yield await tracker.generating_chunk(chunk)
-                    
-                    # 每5个chunk发送一次进度更新
-                    if chunk_count % 5 == 0:
-                        yield await tracker.generating(
-                            current_chars=len(full_content),
-                            estimated_total=target_word_count,
-                            message=f'正在创作中... 已生成 {len(full_content)} 字'
-                        )
-                    
-                    # 每20个chunk发送心跳
-                    if chunk_count % 20 == 0:
-                        yield await tracker.heartbeat()
-                    
-                    await asyncio.sleep(0)  # 让出控制权
+                    if filtered_chunk:  # 只处理非空的过滤后内容
+                        full_content += filtered_chunk
+                        chunk_count += 1
+                        
+                        # 发送内容块
+                        yield await tracker.generating_chunk(filtered_chunk)
+                        
+                        # 每5个chunk发送一次进度更新
+                        if chunk_count % 5 == 0:
+                            yield await tracker.generating(
+                                current_chars=len(full_content),
+                                estimated_total=target_word_count,
+                                message=f'正在创作中... 已生成 {len(full_content)} 字'
+                            )
+                        
+                        # 每20个chunk发送心跳
+                        if chunk_count % 20 == 0:
+                            yield await tracker.heartbeat()
+                        
+                        await asyncio.sleep(0)  # 让出控制权
+                
+                # 刷新过滤器缓冲区，确保 </think> 后尾部正文不会丢失
+                final_chunk = content_filter.flush()
+                if final_chunk:
+                    full_content += final_chunk
+                    yield await tracker.generating_chunk(final_chunk)
+
+                if content_filter.removed_think_chars > 0 or content_filter.removed_meta_lines > 0:
+                    logger.debug(
+                        "章节流式生成已过滤思考/元信息: removed_think_chars=%s, removed_meta_lines=%s",
+                        content_filter.removed_think_chars,
+                        content_filter.removed_meta_lines,
+                    )
+
+                # 兜底清洗：确保最终入库内容不残留 think/meta
+                sanitized_content = clean_novel_content(full_content)
+                if len(sanitized_content) != len(full_content):
+                    logger.debug(
+                        "章节流式生成保存前二次清洗生效: removed_chars=%s",
+                        len(full_content) - len(sanitized_content),
+                    )
+                full_content = sanitized_content
                 
                 # === 保存阶段 ===
                 yield await tracker.saving("正在保存章节...", 0.3)
@@ -3183,9 +3211,29 @@ async def generate_single_chapter_for_batch(
         generate_kwargs["model"] = custom_model
         logger.info(f"  批量生成使用自定义模型: {custom_model}")
     
-    # 批量生成中的流式生成（非SSE，不需要修改进度显示）
+    # 批量生成中的流式生成（非SSE）同样需要过滤思考/元信息，保证入库内容干净
+    content_filter = NovelContentFilter()
     async for chunk in ai_service.generate_text_stream(**generate_kwargs):
-        full_content += chunk
+        full_content += content_filter.filter_chunk(chunk)
+    full_content += content_filter.flush()
+
+    if content_filter.removed_think_chars > 0 or content_filter.removed_meta_lines > 0:
+        logger.debug(
+            "批量生成已过滤思考/元信息: chapter=%s, removed_think_chars=%s, removed_meta_lines=%s",
+            chapter.chapter_number,
+            content_filter.removed_think_chars,
+            content_filter.removed_meta_lines,
+        )
+
+    # 兜底清洗：保证批量任务最终入库内容一致过滤
+    sanitized_content = clean_novel_content(full_content)
+    if len(sanitized_content) != len(full_content):
+        logger.debug(
+            "批量生成保存前二次清洗生效: chapter=%s, removed_chars=%s",
+            chapter.chapter_number,
+            len(full_content) - len(sanitized_content),
+        )
+    full_content = sanitized_content
     
     # 更新章节内容到数据库（使用锁保护）
     async with write_lock:

@@ -7,6 +7,171 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 
 
+_THINK_START_TAG = "<think>"
+_THINK_END_TAG = "</think>"
+
+
+class NovelContentFilter:
+    """小说正文过滤器：移除思考块与明显元信息（支持流式分块）。"""
+
+    _meta_bracket_pattern = re.compile(r"\[Agent[^\]]*AgentThink[^\]]*\]", re.IGNORECASE)
+    _bullet_pattern = re.compile(r"^(?:[-*•]|\d+[\.)]|[一二三四五六七八九十]+[、\.)])\s+")
+    _meta_bullet_keyword_pattern = re.compile(
+        r"AgentThink|reasoning|analysis|plan\b|step\b"
+        r"|(?:思考|推理|分析|步骤|计划)[：:\-—\s]",
+        re.IGNORECASE,
+    )
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._line_buffer = ""
+        self._in_think_block = False
+        self.removed_think_chars = 0
+        self.removed_meta_lines = 0
+
+    def filter_chunk(self, chunk: str) -> str:
+        """过滤一个流式分块，返回可安全展示的正文。"""
+        if not chunk:
+            return ""
+
+        self._buffer += chunk
+        visible = self._extract_visible_content(final=False)
+        return self._filter_meta_lines(visible, final=False)
+
+    def flush(self) -> str:
+        """在流结束时刷新缓冲区，确保尾部正文不丢失。"""
+        visible = self._extract_visible_content(final=True)
+        return self._filter_meta_lines(visible, final=True)
+
+    def clean_text(self, text: str) -> str:
+        """非流式一次性清洗。"""
+        return self.filter_chunk(text) + self.flush()
+
+    def _extract_visible_content(self, final: bool) -> str:
+        output_parts: list[str] = []
+
+        while self._buffer:
+            if self._in_think_block:
+                end_idx = self._buffer.find(_THINK_END_TAG)
+                if end_idx == -1:
+                    if final:
+                        self.removed_think_chars += len(self._buffer)
+                        self._buffer = ""
+                    else:
+                        keep = min(len(self._buffer), len(_THINK_END_TAG) - 1)
+                        removed = len(self._buffer) - keep
+                        if removed > 0:
+                            self.removed_think_chars += removed
+                        self._buffer = self._buffer[-keep:] if keep > 0 else ""
+                    break
+
+                self.removed_think_chars += end_idx + len(_THINK_END_TAG)
+                self._buffer = self._buffer[end_idx + len(_THINK_END_TAG):]
+                self._in_think_block = False
+                continue
+
+            start_idx = self._buffer.find(_THINK_START_TAG)
+            if start_idx == -1:
+                if final:
+                    output_parts.append(self._buffer)
+                    self._buffer = ""
+                else:
+                    keep = min(len(self._buffer), len(_THINK_START_TAG) - 1)
+                    emit_len = len(self._buffer) - keep
+                    if emit_len > 0:
+                        output_parts.append(self._buffer[:emit_len])
+                    self._buffer = self._buffer[-keep:] if keep > 0 else ""
+                break
+
+            if start_idx > 0:
+                output_parts.append(self._buffer[:start_idx])
+
+            self._buffer = self._buffer[start_idx + len(_THINK_START_TAG):]
+            self._in_think_block = True
+
+        return "".join(output_parts)
+
+    def _filter_meta_lines(self, text: str, final: bool) -> str:
+        if not text and not (final and self._line_buffer):
+            return ""
+
+        combined = self._line_buffer + text
+        self._line_buffer = ""
+        filtered_parts: list[str] = []
+
+        for line in combined.splitlines(keepends=True):
+            is_complete_line = line.endswith("\n") or line.endswith("\r")
+            if not is_complete_line and not final:
+                self._line_buffer = line
+                continue
+
+            if self._should_remove_line(line):
+                self.removed_meta_lines += 1
+                continue
+
+            filtered_parts.append(line)
+
+        if final and self._line_buffer:
+            if not self._should_remove_line(self._line_buffer):
+                filtered_parts.append(self._line_buffer)
+            else:
+                self.removed_meta_lines += 1
+            self._line_buffer = ""
+
+        return "".join(filtered_parts)
+
+    def _should_remove_line(self, line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+
+        if "AgentThink" in stripped:
+            return True
+
+        if self._meta_bracket_pattern.search(stripped):
+            return True
+
+        if stripped.startswith(_THINK_START_TAG) or stripped.startswith(_THINK_END_TAG):
+            return True
+
+        if self._bullet_pattern.match(stripped):
+            if len(stripped) <= 80 and self._meta_bullet_keyword_pattern.search(stripped):
+                return True
+
+        return False
+
+
+def clean_novel_content(text: str) -> str:
+    """清洗小说正文中的思考标签和明显元信息。"""
+    if not text:
+        return text
+
+    content_filter = NovelContentFilter()
+    return content_filter.clean_text(text)
+
+
+def _self_check_novel_content_filter() -> None:
+    """内部自检（可手动调用）：验证典型边界输入。使用显式异常以兼容 python -O。"""
+
+    def _check(actual: str, expected: str, label: str) -> None:
+        if actual != expected:
+            raise AssertionError(f"[{label}] expected {expected!r}, got {actual!r}")
+
+    # 1) 单 chunk：<think>...</think> 后正文必须保留
+    f1 = NovelContentFilter()
+    _check(f1.filter_chunk("<think>先思考</think>正文开始") + f1.flush(), "正文开始", "single-chunk-think")
+
+    # 2) 多 chunk：标签跨分片
+    f2 = NovelContentFilter()
+    parts2 = ["前文<th", "ink>隐藏", "内容</th", "ink>后文"]
+    _check("".join(f2.filter_chunk(part) for part in parts2) + f2.flush(), "前文后文", "cross-chunk-think")
+
+    # 3) 混合元信息：仅移除明显 AgentThink / 规划条目
+    f3 = NovelContentFilter()
+    text3 = "[Agent x AgentThink]\n- 计划：先分析人物\n真正的叙事段落。"
+    _check(f3.clean_text(text3), "真正的叙事段落。", "meta-info-removal")
+
+
 def clean_json_response(text: str) -> str:
     """清洗 AI 返回的 JSON（改进版 - 流式安全）"""
     try:
@@ -22,6 +187,16 @@ def clean_json_response(text: str) -> str:
         text = re.sub(r'^```\s*\n?', '', text, flags=re.MULTILINE)
         text = re.sub(r'\n?```\s*$', '', text, flags=re.MULTILINE)
         text = text.strip()
+        
+        # 移除 <think>...</think> 标签（某些模型会输出思考过程）
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        
+        # 移除有害控制字符（保留 \t \n \r 等合法空白）
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+        text = text.strip()
+        
+        # 仅记录长度，避免在 info/error 输出敏感文本
+        logger.debug(f"📄 清洗后的JSON长度: {len(text)}")
         
         if len(text) != original_length:
             logger.debug(f"   移除markdown后长度: {len(text)}")
@@ -43,7 +218,7 @@ def clean_json_response(text: str) -> str:
         
         if start == -1:
             logger.warning(f"⚠️ 未找到JSON起始符号 {{ 或 [")
-            logger.debug(f"   文本预览: {text[:200]}")
+            logger.debug("   未找到 JSON 起始符号，返回原文本")
             return text
         
         if start > 0:
@@ -135,15 +310,13 @@ def clean_json_response(text: str) -> str:
             logger.debug(f"✅ 清洗后JSON验证成功")
         except json.JSONDecodeError as e:
             logger.error(f"❌ 清洗后JSON仍然无效: {e}")
-            logger.debug(f"   结果预览: {result[:500]}")
-            logger.debug(f"   结果结尾: ...{result[-200:]}")
+            logger.debug(f"   结果长度: {len(result)}")
         
         return result
         
     except Exception as e:
         logger.error(f"❌ clean_json_response 出错: {e}")
         logger.error(f"   文本长度: {len(text) if text else 0}")
-        logger.error(f"   文本预览: {text[:200] if text else 'None'}")
         raise
 
 
@@ -155,5 +328,4 @@ def parse_json(text: str) -> Union[Dict, List]:
     except Exception as e:
         logger.error(f"❌ parse_json 出错: {e}")
         logger.error(f"   原始文本长度: {len(text) if text else 0}")
-        logger.error(f"   清洗后文本长度: {len(cleaned) if cleaned else 0}")
         raise

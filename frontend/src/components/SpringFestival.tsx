@@ -72,8 +72,16 @@ function loadBtnPosition(): BtnPosition {
   return getDefaultBtnPosition();
 }
 
+function readEnabled(): boolean {
+  const saved = localStorage.getItem('spring-festival-enabled');
+  return saved === null ? true : saved === 'true';
+}
+
 export default function SpringFestival() {
+  const [enabled, setEnabled] = useState(readEnabled);
+
   const [visible, setVisible] = useState(() => {
+    if (!readEnabled()) return false;
     const saved = localStorage.getItem('spring-festival-visible');
     if (saved !== null) return saved === 'true';
     return isSpringFestivalSeason();
@@ -104,6 +112,48 @@ export default function SpringFestival() {
   const [hasDragged, setHasDragged] = useState(false);
   const dragStartRef = useRef<{ startX: number; startY: number; startBtnX: number; startBtnY: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+
+  // 监听外部开关（例如用户菜单中的开关）
+  useEffect(() => {
+    const handleExternalToggle = (event: Event) => {
+      const customEvent = event as CustomEvent<boolean>;
+      const nextEnabled = Boolean(customEvent.detail);
+      setEnabled(nextEnabled);
+      localStorage.setItem('spring-festival-enabled', String(nextEnabled));
+
+      if (nextEnabled) {
+        const savedVisible = localStorage.getItem('spring-festival-visible');
+        const nextVisible = savedVisible !== null ? savedVisible === 'true' : true;
+        setVisible(nextVisible);
+        setShowBanner(true);
+      } else {
+        setVisible(false);
+      }
+    };
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === 'spring-festival-enabled' && event.newValue !== null) {
+        const nextEnabled = event.newValue === 'true';
+        setEnabled(nextEnabled);
+        if (!nextEnabled) {
+          setVisible(false);
+        } else {
+          const savedVisible = localStorage.getItem('spring-festival-visible');
+          const nextVisible = savedVisible !== null ? savedVisible === 'true' : true;
+          setVisible(nextVisible);
+          setShowBanner(true);
+        }
+      }
+    };
+
+    window.addEventListener('spring-festival-toggle', handleExternalToggle as EventListener);
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('spring-festival-toggle', handleExternalToggle as EventListener);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   // 生成飘落物
   const createFallingItem = useCallback((): FallingItem => {
@@ -416,6 +466,7 @@ export default function SpringFestival() {
 
   // 切换显示状态（只有未拖动时才触发）
   const handleBtnClick = () => {
+    if (!enabled) return;
     if (hasDragged) return; // 拖动过就不触发点击
     const next = !visible;
     setVisible(next);
@@ -435,6 +486,10 @@ export default function SpringFestival() {
     touchAction: 'none',
     userSelect: 'none',
   };
+
+  if (!enabled) {
+    return null;
+  }
 
   return (
     <>

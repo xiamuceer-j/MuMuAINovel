@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Dropdown, Avatar, Space, Typography, message, Modal, Form, Input, Button } from 'antd';
-import { UserOutlined, LogoutOutlined, TeamOutlined, CrownOutlined, LockOutlined } from '@ant-design/icons';
+import { Dropdown, Avatar, Space, Typography, message, Modal, Form, Input, Button, Switch } from 'antd';
+import { UserOutlined, LogoutOutlined, TeamOutlined, CrownOutlined, LockOutlined, GiftOutlined } from '@ant-design/icons';
 import { authApi } from '../services/api';
 import type { User } from '../types';
 import type { MenuProps } from 'antd';
@@ -19,6 +19,10 @@ export default function UserMenu({ showFullInfo = false }: UserMenuProps) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [changePasswordForm] = Form.useForm();
   const [changingPassword, setChangingPassword] = useState(false);
+  const [springFestivalEnabled, setSpringFestivalEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('spring-festival-enabled');
+    return saved === null ? true : saved === 'true';
+  });
 
   useEffect(() => {
     loadCurrentUser();
@@ -68,6 +72,13 @@ export default function UserMenu({ showFullInfo = false }: UserMenuProps) {
     }
   };
 
+  const handleToggleSpringFestival = (enabled: boolean) => {
+    setSpringFestivalEnabled(enabled);
+    localStorage.setItem('spring-festival-enabled', String(enabled));
+    window.dispatchEvent(new CustomEvent('spring-festival-toggle', { detail: enabled }));
+    message.success(enabled ? '已开启新年特效' : '已关闭新年特效');
+  };
+
   const menuItems: MenuProps['items'] = [
     {
       key: 'user-info',
@@ -107,6 +118,23 @@ export default function UserMenu({ showFullInfo = false }: UserMenuProps) {
       type: 'divider',
     },
     {
+      key: 'spring-festival-toggle',
+      icon: <GiftOutlined />,
+      label: '新年特效',
+      extra: (
+        <Switch
+          size="small"
+          checked={springFestivalEnabled}
+          onClick={(_checked, e) => e?.stopPropagation()}
+          onChange={handleToggleSpringFestival}
+        />
+      ),
+      onClick: ({ domEvent }) => domEvent.stopPropagation(),
+    },
+    {
+      type: 'divider',
+    },
+    {
       key: 'logout',
       icon: <LogoutOutlined />,
       label: '退出登录',
@@ -120,7 +148,7 @@ export default function UserMenu({ showFullInfo = false }: UserMenuProps) {
 
   return (
     <>
-      <Dropdown menu={{ items: menuItems }} placement="bottomRight">
+      <Dropdown menu={{ items: menuItems }} placement={showFullInfo ? 'topLeft' : 'bottomRight'}>
         <div
           style={{
             cursor: 'pointer',

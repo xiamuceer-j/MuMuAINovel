@@ -804,6 +804,17 @@ async def get_user_settings(user_id: str, db: AsyncSession) -> Settings:
     return settings
 
 
+def _apply_preset_config_to_settings(settings: Settings, config: dict) -> None:
+    """将预设配置同步到 Settings 主字段。"""
+    settings.api_provider = config['api_provider']
+    settings.api_key = config['api_key']
+    settings.api_base_url = config.get('api_base_url')
+    settings.llm_model = config['llm_model']
+    settings.temperature = config['temperature']
+    settings.max_tokens = config['max_tokens']
+    settings.system_prompt = config.get('system_prompt')
+
+
 @router.get("/presets", response_model=PresetListResponse)
 async def get_presets(
     user: User = Depends(require_login),
@@ -921,6 +932,10 @@ async def update_preset(
         target_preset['description'] = data.description
     if data.config is not None:
         target_preset['config'] = data.config.model_dump()
+
+        # 若更新的是当前激活预设，则同步生效到Settings主字段
+        if target_preset.get('is_active'):
+            _apply_preset_config_to_settings(settings, target_preset['config'])
     
     # 保存回preferences
     prefs['api_presets'] = api_presets
@@ -1005,14 +1020,7 @@ async def activate_preset(
         raise HTTPException(status_code=404, detail="预设不存在")
     
     # 应用配置到Settings主字段
-    config = target_preset['config']
-    settings.api_provider = config['api_provider']
-    settings.api_key = config['api_key']
-    settings.api_base_url = config.get('api_base_url')
-    settings.llm_model = config['llm_model']
-    settings.temperature = config['temperature']
-    settings.max_tokens = config['max_tokens']
-    settings.system_prompt = config.get('system_prompt')
+    _apply_preset_config_to_settings(settings, target_preset['config'])
     
     # 更新所有预设的is_active状态
     for preset in presets:

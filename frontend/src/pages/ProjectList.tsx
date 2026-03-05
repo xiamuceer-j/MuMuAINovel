@@ -1,19 +1,20 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Card, Button, Modal, message, Spin, Space, Tag, Progress, Typography, Alert, Upload, Checkbox, Tooltip, Drawer, Menu } from 'antd';
-import { EditOutlined, DeleteOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, SettingOutlined, UploadOutlined, DownloadOutlined, ApiOutlined, BulbOutlined, LoadingOutlined, FileSearchOutlined, MenuUnfoldOutlined, CloseOutlined } from '@ant-design/icons';
-import { projectApi } from '../services/api';
-import { useStore } from '../store';
-import { useProjectSync } from '../store/hooks';
-import { eventBus, EventNames } from '../store/eventBus';
+import { ApiOutlined, BookOutlined, BulbOutlined, CalendarOutlined, CloseOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileSearchOutlined, FileTextOutlined, LoadingOutlined, MenuUnfoldOutlined, RocketOutlined, SettingOutlined, TrophyOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Checkbox, Drawer, Menu, message, Modal, Progress, Space, Spin, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { ReactNode } from 'react';
-import { cardStyles, cardHoverHandlers } from '../components/CardStyles';
-import UserMenu from '../components/UserMenu';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { cardHoverHandlers, cardStyles } from '../components/CardStyles';
 import ChangelogFloatingButton from '../components/ChangelogFloatingButton';
-import SettingsPage from './Settings';
+import UserMenu from '../components/UserMenu';
+import { projectApi } from '../services/api';
+import { useViewport } from '../hooks/useViewport';
+import { useStore } from '../store';
+import { eventBus, EventNames } from '../store/eventBus';
+import { useProjectSync } from '../store/hooks';
+import BookImport from './BookImport';
 import MCPPluginsPage from './MCPPlugins';
 import PromptTemplates from './PromptTemplates';
-import BookImport from './BookImport';
+import SettingsPage from './Settings';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -62,6 +63,7 @@ export default function ProjectList() {
   const { refreshProjects, deleteProject } = useProjectSync();
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const { isDesktop, isMobile, isMobilePortrait, isMobileLandscape } = useViewport();
 
   // 处理切换到 MCP 视图的事件
   const handleSwitchToMcp = useCallback(() => {
@@ -314,24 +316,23 @@ export default function ProjectList() {
     }
   };
 
-  const isMobile = window.innerWidth <= 768;
 
   return (
     <div style={{
-      height: '100vh',
       display: 'flex',
       flexDirection: 'row', // 改为行布局，容纳侧边栏
       background: 'var(--color-bg-base)',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      height: isMobile ? '100dvh' : '100vh'
     }}>
       {contextHolder}
 
       {/* 侧边栏 - 仅桌面端显示 - 样式对齐 ProjectDetail */}
-      {!isMobile && (
+      {isDesktop && (
         <div style={{
           width: 220, // 对齐 ProjectDetail 的宽度
           background: '#fff',
-          borderRight: '1px solid rgba(0,0,0,0.06)',
+          borderRight: 'none',
           display: 'flex',
           flexDirection: 'column',
           zIndex: 10,
@@ -499,7 +500,7 @@ export default function ProjectList() {
 
           {/* 底部用户信息 */}
           <div style={{ padding: 16, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-             <UserMenu />
+             <UserMenu showFullInfo />
           </div>
         </div>
       )}
@@ -511,7 +512,7 @@ export default function ProjectList() {
         flexDirection: 'column',
         height: '100%',
         overflow: 'hidden',
-        marginLeft: isMobile ? 0 : 220 // 为固定定位的侧边栏留出空间
+        marginLeft: isDesktop ? 220 : 0 // 为固定定位的侧边栏留出空间
       }}>
       
         {/* 移动端顶部导航栏 */}
@@ -520,8 +521,9 @@ export default function ProjectList() {
             flexShrink: 0,
             background: 'var(--color-primary)',
             boxShadow: 'var(--shadow-header)',
-            height: 56,
-            padding: '0 12px',
+            height: isMobileLandscape ? 48 : 56,
+            padding: isMobileLandscape ? '0 10px' : '0 12px',
+            paddingTop: 'env(safe-area-inset-top, 0px)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -533,31 +535,31 @@ export default function ProjectList() {
                   icon={<MenuUnfoldOutlined />}
                   onClick={() => setDrawerVisible(true)}
                   style={{
-                    fontSize: 18,
+                    fontSize: isMobileLandscape ? 16 : 18,
                     color: '#fff',
-                    width: 36,
-                    height: 36
+                    width: isMobileLandscape ? 32 : 36,
+                    height: isMobileLandscape ? 32 : 36
                   }}
                 />
              </div>
              
-             <span style={{
-               color: '#fff',
-               fontWeight: 600,
-               fontSize: 16,
-               flex: 1,
-               textAlign: 'center',
-               overflow: 'hidden',
-               textOverflow: 'ellipsis',
-               whiteSpace: 'nowrap',
-               paddingRight: 36  // 为了与左侧菜单按钮对称
-             }}>
-               {activeView === 'projects' ? '我的书架' :
-                activeView === 'prompts' ? '提示词模板' :
-                activeView === 'book-import' ? '拆书导入' :
-                activeView === 'mcp' ? 'MCP 插件' : 'API 设置'}
-             </span>
-          </div>
+              <span style={{
+                color: '#fff',
+                fontWeight: 600,
+                fontSize: isMobileLandscape ? 14 : 16,
+                flex: 1,
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                paddingRight: 36  // 为了与左侧菜单按钮对称
+              }}>
+                {activeView === 'projects' ? '我的书架' :
+                 activeView === 'prompts' ? '提示词模板' :
+                 activeView === 'book-import' ? '拆书导入' :
+                 activeView === 'mcp' ? 'MCP 插件' : 'API 设置'}
+              </span>
+           </div>
         )}
 
         {/* 移动端侧边栏 Drawer */}
@@ -578,7 +580,7 @@ export default function ProjectList() {
                 }}>
                   <BookOutlined />
                 </div>
-                <span style={{ fontWeight: 600, fontSize: 16 }}>MuMuAINovel</span>
+               <span style={{ fontWeight: 600, fontSize: isMobileLandscape ? 14 : 16 }}>MuMuAINovel</span>
               </div>
             }
             closeIcon={null}
@@ -593,7 +595,7 @@ export default function ProjectList() {
             placement="left"
             onClose={() => setDrawerVisible(false)}
             open={drawerVisible}
-            width="60%"
+            width={isMobilePortrait ? '82%' : '56%'}
             styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
           >
             <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -682,7 +684,7 @@ export default function ProjectList() {
         )}
 
         {/* 桌面端顶部标题栏 */}
-        {!isMobile && (
+        {isDesktop && (
           <div style={{
              height: 70, // 与 ProjectDetail header 高度一致
              padding: '0 24px',
@@ -775,7 +777,7 @@ export default function ProjectList() {
             flex: 1,
             overflowY: 'auto',
             padding: (activeView === 'projects' || activeView === 'book-import')
-              ? `${isMobile ? 16 : 24}px ${isMobile ? 16 : 32}px`
+              ? `${isMobile ? (isMobilePortrait ? 16 : 12) : 24}px ${isMobile ? (isMobilePortrait ? 16 : 14) : 32}px`
               : 0,
             background: 'var(--color-bg-base)',
           }}
@@ -831,19 +833,19 @@ export default function ProjectList() {
             <Spin spinning={loading}>
               <div style={{
                 ...cardStyles.bookshelf,
-                // 移动端显示一列
+                // 移动端竖屏一列，横屏双列
                 ...(isMobile && {
-                  gridTemplateColumns: '1fr',
-                  gap: '16px',
-                  padding: '16px 0',
+                  gridTemplateColumns: isMobilePortrait ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+                  gap: isMobilePortrait ? '16px' : '12px',
+                  padding: isMobilePortrait ? '16px 0' : '12px 0',
                 })
               }}>
                 {/* 新建/灵感卡片 */}
-                <div style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: isMobile ? 300 : 330 }}>
+                <div style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: isMobile ? (isMobilePortrait ? 300 : 250) : 330 }}>
                   <Card
                     hoverable
-                    style={{ ...cardStyles.newProjectBook, minHeight: isMobile ? 300 : 330 }}
-                    styles={{ body: { padding: isMobile ? '16px' : '24px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' } }}
+                    style={{ ...cardStyles.newProjectBook, minHeight: isMobile ? (isMobilePortrait ? 300 : 250) : 330 }}
+                    styles={{ body: { padding: isMobile ? (isMobilePortrait ? '16px' : '12px') : '24px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' } }}
                     {...cardHoverHandlers}
                     data-type="new-project"
                   >
@@ -1138,7 +1140,7 @@ export default function ProjectList() {
         confirmLoading={importing}
         okText="导入"
         cancelText="取消"
-        width={isMobile ? '90%' : 500}
+        width={isMobile ? (isMobilePortrait ? '90%' : '72%') : 500}
         centered
         okButtonProps={{ disabled: !validationResult?.valid }}
       >
@@ -1232,7 +1234,7 @@ export default function ProjectList() {
         confirmLoading={exporting}
         okText={selectedProjectIds.length > 0 ? `导出 (${selectedProjectIds.length})` : '导出'}
         cancelText="取消"
-        width={isMobile ? '90%' : 700}
+        width={isMobile ? (isMobilePortrait ? '90%' : '82%') : 700}
         centered
         okButtonProps={{ disabled: selectedProjectIds.length === 0 }}
       >

@@ -1,6 +1,7 @@
 """AI 客户端基类"""
 import asyncio
 import hashlib
+import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -109,7 +110,14 @@ class BaseAIClient(ABC):
 
                     response = await self.http_client.request(method, url, headers=headers, json=payload)
                     response.raise_for_status()
-                    return response.json()
+                    
+                    try:
+                        return response.json()
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ JSON 解析失败: {e}")
+                        logger.error(f"📄 响应状态码: {response.status_code}")
+                        logger.error(f"📄 响应内容: {response.text[:500]}")  # 只记录前500字符
+                        raise ValueError(f"API 返回了非 JSON 响应 (状态码: {response.status_code})")
 
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in retry_cfg.non_retryable_status_codes:

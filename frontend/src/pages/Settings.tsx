@@ -512,6 +512,11 @@ export default function SettingsPage() {
           config,
         });
         message.success('预设已更新');
+
+        // 若编辑的是激活预设，更新后立即刷新当前配置，保持UI与服务端一致
+        if (editingPreset.id === activePresetId) {
+          loadSettings();
+        }
       } else {
         const request: PresetCreateRequest = {
           name: values.name,
@@ -1120,11 +1125,6 @@ export default function SettingsPage() {
                               dropdownRender={(menu) => (
                                 <>
                                   {menu}
-                                  {fetchingModels && (
-                                    <div style={{ padding: '8px 12px', color: 'var(--color-text-secondary)', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
-                                      <Spin size="small" /> 正在获取模型列表...
-                                    </div>
-                                  )}
                                   {!fetchingModels && modelOptions.length === 0 && modelsFetched && !modelSearchText && (
                                     <div style={{ padding: '8px 12px', color: '#ff4d4f', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
                                       未能获取到模型列表，可直接输入模型名称
@@ -1137,13 +1137,7 @@ export default function SettingsPage() {
                                   )}
                                 </>
                               )}
-                              notFoundContent={
-                                fetchingModels ? (
-                                  <div style={{ padding: '8px 12px', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
-                                    <Spin size="small" /> 加载中...
-                                  </div>
-                                ) : null
-                              }
+                              notFoundContent={fetchingModels ? <Space><Spin size="small" />正在获取模型列表...</Space> : null}
                               suffixIcon={
                                 !isMobile ? (
                                   <div
@@ -1636,11 +1630,6 @@ export default function SettingsPage() {
                     dropdownRender={(menu) => (
                       <>
                         {menu}
-                        {fetchingPresetModels && (
-                          <div style={{ padding: '8px 12px', color: 'var(--color-text-secondary)', textAlign: 'center', fontSize: '12px' }}>
-                            <Spin size="small" /> 正在获取模型列表...
-                          </div>
-                        )}
                         {!fetchingPresetModels && presetModelOptions.length === 0 && presetModelsFetched && !presetModelSearchText && (
                           <div style={{ padding: '8px 12px', color: '#ff4d4f', textAlign: 'center', fontSize: '12px' }}>
                             未能获取到模型列表，可直接输入模型名称
@@ -1653,13 +1642,7 @@ export default function SettingsPage() {
                         )}
                       </>
                     )}
-                    notFoundContent={
-                      fetchingPresetModels ? (
-                        <div style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px' }}>
-                          <Spin size="small" /> 加载中...
-                        </div>
-                      ) : null
-                    }
+                    notFoundContent={fetchingPresetModels ? <Space><Spin size="small" />正在获取模型列表...</Space> : null}
                     suffixIcon={
                       <div
                         onClick={(e) => {

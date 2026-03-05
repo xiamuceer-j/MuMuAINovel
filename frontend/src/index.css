@@ -123,8 +123,8 @@ body {
     height: 4px;
   }
 
-  /* 移动端优化触摸区域 */
-  button,
+  /* 移动端优化触摸区域（排除 Switch 等小型控件） */
+  button:not([role="switch"]),
   a,
   [role="button"] {
     min-height: 44px;

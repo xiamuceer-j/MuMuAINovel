@@ -32,9 +32,8 @@ class OpenAIClient(BaseAIClient):
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "stream": stream,
         }
-        if stream:
-            payload["stream"] = True
         if tools:
             # 清理 $schema 字段
             cleaned = []

@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { FloatButton, Grid } from 'antd';
+import { FloatButton } from 'antd';
 import { FileTextOutlined } from '@ant-design/icons';
 import ChangelogModal from './ChangelogModal';
-
-const { useBreakpoint } = Grid;
+import { useViewport } from '../hooks/useViewport';
 
 export default function ChangelogFloatingButton() {
   const [showChangelog, setShowChangelog] = useState(false);
-  const screens = useBreakpoint();
-  const isMobile = !screens.md;
+  const { isMobile } = useViewport();
+
+  // 移动端不显示悬浮按钮，避免遮挡主内容与底部操作区域
+  if (isMobile) {
+    return null;
+  }
 
   return (
     <>
@@ -17,14 +20,10 @@ export default function ChangelogFloatingButton() {
         type="primary"
         tooltip="查看更新日志"
         style={{
-          // 桌面端时，确保按钮在主内容区域内（侧边栏右侧）
           right: 24,
           bottom: 100,
-          // 移动端无侧边栏，不需要额外处理
-          ...(isMobile ? {} : {
-            // 确保 zIndex 低于侧边栏但高于内容
-            zIndex: 999,
-          }),
+          // 确保 zIndex 低于侧边栏但高于内容
+          zIndex: 999,
         }}
         onClick={() => setShowChangelog(true)}
       />

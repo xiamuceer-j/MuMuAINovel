@@ -1205,7 +1205,7 @@ class BookImportService:
         fallback_outlines = [
             BookImportOutline(
                 title=chapter.title,
-                content=(chapter.summary or self._build_summary(chapter.content or "")),
+                content=str(chapter.summary or self._build_summary(chapter.content or "") or "").strip(),
                 order_index=chapter.chapter_number,
                 structure=self._build_fallback_outline_structure(chapter),
             )
@@ -1378,7 +1378,7 @@ class BookImportService:
         }
 
     def _build_fallback_outline_structure(self, chapter: BookImportChapter) -> dict[str, Any]:
-        summary = (chapter.summary or self._build_summary(chapter.content or "")).strip()
+        summary = str(chapter.summary or self._build_summary(chapter.content or "") or "").strip()
         if not summary:
             summary = "本章围绕主要人物与核心冲突推进剧情。"
 

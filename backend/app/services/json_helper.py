@@ -16,6 +16,16 @@ def clean_json_response(text: str) -> str:
         
         original_length = len(text)
         logger.debug(f"🔍 开始清洗JSON，原始长度: {original_length}")
+                
+        # 替换中文引号和特殊符号（在JSON字符串值中会导致解析失败）
+        text = text.replace('\u201c', '\u300a')  # " → 《
+        text = text.replace('\u201d', '\u300b')  # " → 》
+        text = text.replace('\u2018', '\u300a')  # ' → 《
+        text = text.replace('\u2019', '\u300b')  # ' → 》
+        text = text.replace('\u300e', '\u300a')  # 『 → 《
+        text = text.replace('\u300f', '\u300b')  # 』 → 》
+        text = text.replace('\u300c', '\u300a')  # 「 → 《
+        text = text.replace('\u300d', '\u300b')  # 」 → 》
         
         # 去除 markdown 代码块
         text = re.sub(r'^```json\s*\n?', '', text, flags=re.MULTILINE | re.IGNORECASE)

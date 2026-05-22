@@ -185,12 +185,38 @@ async def auto_select_skill(
         logger.info("🎯 没有可用的写作/润色类 Skill，跳过自动选择")
         return None
 
+    # 提取精简的章节摘要（从完整 prompt 中提取关键信息，控制在 1500 字以内）
+    import re as _re
+    # 尝试提取大纲和情感基调等关键信息
+    summary_parts = []
+    
+    # 提取章节概要
+    outline_match = _re.search(r'【章节概要】\s*(.+?)(?=【|$)', chapter_context, _re.DOTALL)
+    if outline_match:
+        summary_parts.append(f"章节概要：{outline_match.group(1).strip()[:500]}")
+    
+    # 提取情感基调
+    emotion_match = _re.search(r'【情感基调】\s*(.+?)(?=【|$)', chapter_context, _re.DOTALL)
+    if emotion_match:
+        summary_parts.append(f"情感基调：{emotion_match.group(1).strip()[:200]}")
+    
+    # 提取叙事目标
+    goal_match = _re.search(r'【叙事目标】\s*(.+?)(?=【|$)', chapter_context, _re.DOTALL)
+    if goal_match:
+        summary_parts.append(f"叙事目标：{goal_match.group(1).strip()[:200]}")
+    
+    # 如果提取失败，使用截断的原文
+    if not summary_parts:
+        summary_parts.append(chapter_context[:1500])
+    
+    chapter_summary = "\n".join(summary_parts)
+
     # 构建让 AI 选择 Skill 的提示词
-    selection_prompt = f"""你是一个专业的小说创作助手。请根据以下章节上下文，判断是否需要使用某个 Skill（写作技巧工具）来辅助创作。
+    selection_prompt = f"""你是一个专业的小说创作助手。请根据以下章节信息，判断是否需要使用某个 Skill（写作技巧工具）来辅助创作。
 
-## 章节上下文
+## 章节信息
 
-{chapter_context[:3000]}
+{chapter_summary}
 
 ---
 
@@ -201,12 +227,13 @@ async def auto_select_skill(
 
     try:
         # 使用 generate_text + tools，让 AI 通过 function calling 选择
+        # max_tokens 设为 500，兼容推理模型（reasoning_tokens 不计入输出）
         response = await ai_service.generate_text(
             prompt=selection_prompt,
             provider=provider,
             model=model,
             temperature=0.3,  # 低温度，让选择更确定
-            max_tokens=200,
+            max_tokens=500,
             system_prompt="你是一个专业的小说创作助手。请根据章节上下文选择最合适的 Skill 工具，或者判断不需要使用 Skill。",
             tools=skill_tools,
             tool_choice="auto",

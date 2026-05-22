@@ -97,7 +97,7 @@ def _parse_yaml_frontmatter(content: str) -> Dict[str, str]:
         if type_val in SKILL_TYPES:
             result['skill_type'] = type_val
     
-    desc_match = re.search(r'description:\s*\|(.*?)^(?=\S)', yaml_text, re.MULTILINE | re.DOTALL)
+    desc_match = re.search(r'description:\s*\|(.*?)(?=^\S|\Z)', yaml_text, re.MULTILINE | re.DOTALL)
     if desc_match:
         desc = desc_match.group(1).strip()
         # 清理缩进

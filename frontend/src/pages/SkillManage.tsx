@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Table, Modal, Form, Input, Tag, Space, message, Popconfirm, Card, theme, Empty, Badge } from 'antd';
+import { Button, Table, Modal, Form, Input, Tag, Space, message, Popconfirm, Card, theme, Empty, Badge, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, ThunderboltOutlined, FileTextOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
@@ -8,6 +8,8 @@ interface SkillItem {
   template_key: string;
   template_name: string;
   category: string;
+  skill_type: string;
+  category_hint: string;
   description: string;
   triggers: string[];
 }
@@ -16,11 +18,21 @@ interface SkillDetail {
   template_key: string;
   template_name: string;
   category: string;
+  skill_type: string;
+  category_hint: string;
   description: string;
   triggers: string[];
   raw_content: string;
   standalone_references: Record<string, string>;
 }
+
+const SKILL_TYPE_OPTIONS = [
+  { value: 'writing', label: '✍️ 写作类', hint: '创作章节时注入 → 改变 AI 写作风格（对话、悬念等）' },
+  { value: 'polishing', label: '✨ 润色类', hint: '生成两次：先写初稿 → 再自动润色去AI味' },
+  { value: 'analysis', label: '🔍 分析类', hint: 'Skill Chat 对话中使用，分析章节内容' },
+  { value: 'tool', label: '🔧 工具类', hint: 'Skill Chat 对话中使用，浏览器、搜索等辅助能力' },
+  { value: 'generic', label: '💬 通用类', hint: 'Skill Chat 对话中使用，通用助手' },
+];
 
 export default function SkillManage() {
   const { token } = theme.useToken();
@@ -63,6 +75,7 @@ export default function SkillManage() {
         const detail: SkillDetail = await response.json();
         setEditingSkill(detail);
         editForm.setFieldsValue({
+          skill_type: detail.skill_type || 'generic',
           description: detail.description,
           body: detail.raw_content.split('---').slice(2).join('---').trim(),
           references: JSON.stringify(detail.standalone_references, null, 2),
@@ -115,6 +128,7 @@ export default function SkillManage() {
           description: values.description,
           body: values.body,
           references: refs,
+          skill_type: values.skill_type,
         }),
       });
 
@@ -157,6 +171,7 @@ export default function SkillManage() {
           description: values.description,
           body: values.body,
           references: refs,
+          skill_type: values.skill_type,
         }),
       });
 
@@ -205,16 +220,30 @@ export default function SkillManage() {
       title: '分类',
       dataIndex: 'category',
       key: 'category',
-      width: 120,
-      render: (cat: string) => {
+      width: 200,
+      render: (cat: string, record: SkillItem) => {
         const colorMap: Record<string, string> = {
-          'Skill·长篇': 'blue',
-          'Skill·短篇': 'green',
+          '✍️ 写作类': 'blue',
+          '✨ 润色类': 'orange',
+          '🔍 分析类': 'green',
+          '🔧 工具类': 'purple',
+          '💬 通用类': 'default',
+          'Skill·写作': 'blue',
           'Skill·润色': 'orange',
+          'Skill·分析': 'green',
           'Skill·工具': 'purple',
           'Skill': 'default',
         };
-        return <Tag color={colorMap[cat] || 'default'}>{cat}</Tag>;
+        return (
+          <div>
+            <Tag color={colorMap[cat] || 'default'}>{cat}</Tag>
+            {record.category_hint && (
+              <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 2 }}>
+                {record.category_hint}
+              </div>
+            )}
+          </div>
+        );
       },
     },
     {
@@ -384,6 +413,19 @@ export default function SkillManage() {
         destroyOnClose
       >
         <Form form={editForm} layout="vertical">
+          <Form.Item label="分类" name="skill_type" rules={[{ required: true, message: '请选择分类' }]}
+            tooltip="决定 Skill 的生效时机和执行方式">
+            <Select placeholder="选择 Skill 分类">
+              {SKILL_TYPE_OPTIONS.map(opt => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  <div>
+                    <div>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: '#999' }}>{opt.hint}</div>
+                  </div>
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
           <Form.Item label="描述" name="description" rules={[{ required: true, message: '请输入描述' }]}
             tooltip="第一句话会作为 UI 显示名称">
             <TextArea rows={3} placeholder="一句话描述 Skill 功能。后续详细说明..." />
@@ -418,6 +460,19 @@ export default function SkillManage() {
           <Form.Item label="Skill 名称（英文）" name="name" rules={[{ required: true, message: '请输入名称' }]}
             tooltip="英文小写+短横线，如 my-new-skill。将作为目录名和内部标识">
             <Input placeholder="my-new-skill" />
+          </Form.Item>
+          <Form.Item label="分类" name="skill_type" rules={[{ required: true, message: '请选择分类' }]}
+            tooltip="决定 Skill 的生效时机和执行方式">
+            <Select placeholder="选择 Skill 分类">
+              {SKILL_TYPE_OPTIONS.map(opt => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  <div>
+                    <div>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: '#999' }}>{opt.hint}</div>
+                  </div>
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item label="描述" name="description" rules={[{ required: true, message: '请输入描述' }]}
             tooltip="第一句话会作为 UI 显示名称">

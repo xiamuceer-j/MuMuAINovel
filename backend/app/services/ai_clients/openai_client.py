@@ -26,13 +26,20 @@ class OpenAIClient(BaseAIClient):
         tools: Optional[list] = None,
         tool_choice: Optional[str] = None,
         stream: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # 思考模式：用户自己选择，不支持的话关掉就好
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+            payload["enable_thinking"] = True
+            logger.info(f"🧠 思考模式: reasoning_effort={reasoning_effort}")
+        else:
+            payload["temperature"] = temperature
         if stream:
             payload["stream"] = True
         if tools:
@@ -94,6 +101,7 @@ class OpenAIClient(BaseAIClient):
         max_tokens: int,
         tools: Optional[list] = None,
         tool_choice: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式生成，支持工具调用
@@ -104,7 +112,7 @@ class OpenAIClient(BaseAIClient):
             - tool_calls: list - 工具调用列表（如果有）
             - done: bool - 是否结束
         """
-        payload = self._build_payload(messages, model, temperature, max_tokens, tools, tool_choice, stream=True)
+        payload = self._build_payload(messages, model, temperature, max_tokens, tools, tool_choice, stream=True, reasoning_effort=reasoning_effort)
         
         tool_calls_buffer = {}  # 收集工具调用块
         
@@ -127,6 +135,11 @@ class OpenAIClient(BaseAIClient):
                                 if choices and len(choices) > 0:
                                     delta = choices[0].get("delta", {})
                                     content = delta.get("content", "")
+                                    
+                                    # 检查思考内容（DeepSeek R1 / Qwen 等推理模型）
+                                    reasoning_content = delta.get("reasoning_content", "")
+                                    if reasoning_content:
+                                        yield {"reasoning_content": reasoning_content}
                                     
                                     # 检查工具调用
                                     tc_list = delta.get("tool_calls")

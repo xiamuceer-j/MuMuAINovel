@@ -68,6 +68,7 @@ function App() {
             <Route path="chapter-analysis" element={<ChapterAnalysis />} />
             <Route path="foreshadows" element={<Foreshadows />} />
             <Route path="writing-styles" element={<WritingStyles />} />
+            <Route path="prompt-workshop" element={<PromptWorkshop />} />
             <Route path="skill-chat" element={<SkillChat />} />
             <Route path="skill-manage" element={<SkillManage />} />
             <Route path="sponsor" element={<Sponsor />} />

@@ -105,13 +105,14 @@ async def polish_batch(
         # 获取用户ID
         user_id = getattr(http_request.state, 'user_id', None) if http_request else None
         
+        # 在循环外获取模板，避免重复查询数据库
+        template = await PromptService.get_template("AI_DENOISING", user_id, db)
+        
         results = []
         
         for idx, text in enumerate(texts):
             logger.info(f"处理第 {idx+1}/{len(texts)} 个文本")
             
-            # 获取自定义提示词模板
-            template = await PromptService.get_template("AI_DENOISING", user_id, db)
             # 格式化提示词
             prompt = PromptService.format_prompt(template, original_text=text)
             

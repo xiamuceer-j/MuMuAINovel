@@ -1349,6 +1349,7 @@ async def generate_chapter_content_stream(
     custom_model = generate_request.model if hasattr(generate_request, 'model') else None
     temp_narrative_perspective = generate_request.narrative_perspective if hasattr(generate_request, 'narrative_perspective') else None
     skill_key = generate_request.skill_key if hasattr(generate_request, 'skill_key') else None
+    reasoning_effort = generate_request.reasoning_effort if hasattr(generate_request, 'reasoning_effort') else None
     # 预先验证章节存在性（使用临时会话）
     async for temp_db in get_db(request):
         try:
@@ -1629,26 +1630,66 @@ async def generate_chapter_content_stream(
                 system_prompt_with_style = None
                 
                 # ⚡ Skill 支持：当指定 skill_key 时，将 Skill 工作流注入系统提示词
+                polishing_skill = None  # 润色类 Skill 暂存，用于两步流程
+                
+                # 🤖 自动模式：AI 通过 Function Calling 自主选择最适合的 Skill
+                if skill_key == "auto":
+                    try:
+                        from app.services.skill_tools_loader import auto_select_skill
+                        yield await tracker.preparing("AI 正在分析最适合的 Skill...")
+                        auto_skill = await auto_select_skill(
+                            ai_service=user_ai_service,
+                            chapter_context=prompt,
+                            model=custom_model,
+                        )
+                        if auto_skill:
+                            skill_key = auto_skill
+                            logger.info(f"🤖 AI 自动选择了 Skill: {skill_key}")
+                        else:
+                            skill_key = None
+                            logger.info("🤖 AI 判断当前章节不需要使用 Skill")
+                    except Exception as auto_err:
+                        logger.warning(f"⚠️ Skill 自动选择失败: {auto_err}，将不使用 Skill")
+                        skill_key = None
+                
                 if skill_key:
                     try:
                         from app.services.skill_loader import get_all_skills_cached
                         skills = get_all_skills_cached()
                         skill = next((s for s in skills if s["template_key"] == skill_key), None)
                         if skill:
+                            skill_type = skill.get("skill_type", "generic")
                             skill_content = skill["content"]
                             skill_name = skill["template_name"]
-                            system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+                            
+                            if skill_type == "polishing":
+                                # 润色类 Skill：先正常生成，完成后用 Skill 润色（两步流程）
+                                polishing_skill = skill
+                                # 仍然将写作风格注入（如果有）
+                                if style_content:
+                                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                                logger.info(f"⚡ 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
+                            else:
+                                # 写作类/通用类 Skill：先放写作风格，Skill 放最后
+                                if style_content:
+                                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                                system_prompt_with_style = (system_prompt_with_style or "") + f"""
+
+【⚡ Skill 工作流：{skill_name}】
 
 {skill_content}
 
 ⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
-                            if style_content:
-                                system_prompt_with_style += f"""
-
-【🎨 写作风格要求 - 补充】
-
-{style_content}"""
-                            logger.info(f"⚡ 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+                                logger.info(f"⚡ 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
                         else:
                             logger.warning(f"⚠️ 未找到 Skill: {skill_key}")
                     except Exception as skill_err:
@@ -1667,14 +1708,7 @@ async def generate_chapter_content_stream(
                 # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
                 # 同时设置上限防止过长，下限确保基本可用
                 calculated_max_tokens = int(target_word_count * 3)
-                calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
-                logger.info(f"📊 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
-                
-                # 🔢 计算 max_tokens 限制
-                # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
-                # 同时设置上限防止过长，下限确保基本可用
-                calculated_max_tokens = int(target_word_count * 3)
-                calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
+                calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))  # 限制在 2000-32000 之间（思考模式需要更多空间）
                 logger.info(f"📊 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
                 
                 # 准备生成参数
@@ -1689,6 +1723,11 @@ async def generate_chapter_content_stream(
                     generate_kwargs["model"] = custom_model
                     # 注意：这里使用用户配置的AI服务，模型参数会覆盖默认模型
                     # 如果需要切换provider，需要在前端传递provider参数
+                if reasoning_effort:
+                    generate_kwargs["reasoning_effort"] = reasoning_effort
+                    # 思考模式下推理 token 会占用 max_tokens，需要 3 倍确保输出不被截断
+                    generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 3, 128000)
+                    logger.info(f"  🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
                 
                 # === 生成阶段 ===
                 full_content = ""
@@ -1719,6 +1758,72 @@ async def generate_chapter_content_stream(
                         yield await tracker.heartbeat()
                     
                     await asyncio.sleep(0)  # 让出控制权
+                
+                # === 润色阶段（两步流程：润色类 Skill） ===
+                if polishing_skill:
+                    polishing_content = polishing_skill["content"]
+                    polishing_name = polishing_skill["template_name"]
+                    logger.info(f"✨ 两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
+                    
+                    yield await tracker.generating(
+                        current_chars=0,
+                        estimated_total=len(full_content),
+                        message=f'正在润色去AI味（{polishing_name}）...'
+                    )
+                    
+                    # 构建润色 prompt - 直接用 Skill 内容作为指令，不做多阶段拆分
+                    polishing_system = f"""{polishing_content}"""
+
+                    polishing_user_prompt = f"""请对以下章节内容执行润色，只做局部修改，不要整段重写。直接输出润色后的完整正文，不要任何解释。
+
+{full_content}"""
+
+                    # 润色是局部修改，token 用量接近原文即可，给 1.5 倍空间足够
+                    polishing_max_tokens = max(2000, min(int(len(full_content) * 1.5), 12000))
+                    
+                    polishing_kwargs = {
+                        "prompt": polishing_user_prompt,
+                        "system_prompt": polishing_system,
+                        "max_tokens": polishing_max_tokens,
+                    }
+                    if custom_model:
+                        polishing_kwargs["model"] = custom_model
+                    if reasoning_effort:
+                        polishing_kwargs["reasoning_effort"] = reasoning_effort
+                    
+                    polished_content = ""
+                    polish_chunk_count = 0
+                    
+                    async for chunk in user_ai_service.generate_text_stream(**polishing_kwargs):
+                        polished_content += chunk
+                        polish_chunk_count += 1
+                        
+                        # 发送润色内容块（用特殊事件标记）
+                        yield await SSEResponse.send_event('polishing_chunk', {'content': chunk})
+                        
+                        if polish_chunk_count % 5 == 0:
+                            yield await tracker.generating(
+                                current_chars=len(polished_content),
+                                estimated_total=len(full_content),
+                                message=f'润色中... 已处理 {len(polished_content)} 字'
+                            )
+                        
+                        if polish_chunk_count % 20 == 0:
+                            yield await tracker.heartbeat()
+                        
+                        await asyncio.sleep(0)
+                    
+                    # 用润色后的内容替换原始内容
+                    if polished_content.strip():
+                        full_content = polished_content.strip()
+                        logger.info(f"✨ 润色完成：{len(full_content)}字")
+                        # 发送润色完成事件
+                        yield await SSEResponse.send_event('polishing_done', {
+                            'word_count': len(full_content),
+                            'original_word_count': len(full_content),
+                        })
+                    else:
+                        logger.warning(f"⚠️ 润色结果为空，使用原始内容")
                 
                 # === 保存阶段 ===
                 yield await tracker.saving("正在保存章节...", 0.3)
@@ -2155,7 +2260,7 @@ async def _run_chapter_generation_bg(
 确保在整个章节创作过程中始终保持风格的一致性。"""
 
     calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))
+    calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))
 
     generate_kwargs = {
         "prompt": prompt,
@@ -2272,484 +2377,6 @@ async def _run_chapter_generation_bg(
             user_id=user_id,
             project_id=current_chapter.project_id,
             task_id=analysis_task.id
-        )
-    )
-
-    # === 完成 ===
-    await tracker.complete(f"创作完成！共 {new_word_count} 字")
-
-    # 更新任务结果
-    from app.services.background_task_service import background_task_service
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as BgAsyncSession
-    from app.database import get_engine as bg_get_engine
-    try:
-        engine = await bg_get_engine(user_id)
-        AsyncSessionLocal = async_sessionmaker(engine, class_=BgAsyncSession, expire_on_commit=False)
-        async with AsyncSessionLocal() as result_db:
-            from sqlalchemy import update as sql_update
-            await result_db.execute(
-                sql_update(BackgroundTask)
-                .where(BackgroundTask.id == task_id)
-                .values(task_result={
-                    "chapter_id": chapter_id,
-                    "word_count": new_word_count,
-                    "analysis_task_id": analysis_task.id
-                })
-            )
-            await result_db.commit()
-    except Exception as e:
-        logger.warning(f"⚠️ 更新任务结果失败: {e}")
-
-
-def _build_analysis_task_status_payload(
-    chapter_id: str,
-    task: Optional[AnalysisTask],
-    auto_recovered: bool = False
-) -> dict:
-    """统一构建分析任务状态响应"""
-    if not task:
-        return {
-            "has_task": False,
-            "chapter_id": chapter_id,
-            "status": "none",
-            "progress": 0,
-            "error_message": None,
-            "auto_recovered": False,
-            "task_id": None,
-            "created_at": None,
-            "started_at": None,
-            "completed_at": None
-        }
-
-    return {
-        "has_task": True,
-        "task_id": task.id,
-        "chapter_id": task.chapter_id,
-        "status": task.status,
-        "progress": task.progress,
-        "error_message": task.error_message,
-        "auto_recovered": auto_recovered,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None
-    }
-
-
-@router.get("/{chapter_id}/analysis/status", summary="查询章节分析任务状态", response_model=AnalysisTaskStatusResponse)
-async def get_analysis_task_status(
-    chapter_id: str,
-    request: Request,
-    generate_request: ChapterGenerateRequest = ChapterGenerateRequest(),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    创建后台任务来生成章节内容。
-    任务创建后立即返回task_id，前端通过 GET /api/tasks/{task_id} 轮询进度。
-    关闭浏览器不影响生成，生成完成后内容自动保存到数据库。
-    """
-    user_id = getattr(request.state, 'user_id', None)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="未登录")
-
-    # 验证章节存在
-    result = await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id)
-    )
-    chapter = result.scalar_one_or_none()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="章节不存在")
-
-    # 验证项目权限
-    project = await verify_project_access(chapter.project_id, user_id, db)
-
-    # 检查前置条件
-    can_generate, error_msg, _ = await check_prerequisites(db, chapter)
-    if not can_generate:
-        raise HTTPException(status_code=400, detail=error_msg)
-
-    # 创建后台任务
-    from app.services.background_task_service import background_task_service, TaskProgressTracker
-    task = await background_task_service.create_task(
-        user_id=user_id,
-        project_id=chapter.project_id,
-        task_type="chapter_generate",
-        task_input={
-            "chapter_id": chapter_id,
-            "style_id": generate_request.style_id,
-            "target_word_count": generate_request.target_word_count or 3000,
-            "enable_mcp": generate_request.enable_mcp,
-            "model": generate_request.model,
-            "narrative_perspective": generate_request.narrative_perspective,
-        },
-        db=db
-    )
-
-    # 后台执行的函数
-    async def _run_chapter_generation(task_id: str, bg_user_id: str):
-        from app.database import get_engine
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as BgAsyncSession
-
-        engine = await get_engine(bg_user_id)
-        AsyncSessionLocal = async_sessionmaker(engine, class_=BgAsyncSession, expire_on_commit=False)
-
-        async with AsyncSessionLocal() as bg_db:
-            tracker = TaskProgressTracker(task_id, bg_user_id, "章节")
-            try:
-                await tracker.start()
-
-                # 获取AI服务
-                from app.api.settings import get_user_ai_service_from_db
-                bg_ai_service = await get_user_ai_service_from_db(bg_user_id, bg_db)
-
-                await _run_chapter_generation_bg(
-                    task_input={
-                        "chapter_id": chapter_id,
-                        "style_id": generate_request.style_id,
-                        "target_word_count": generate_request.target_word_count or 3000,
-                        "enable_mcp": generate_request.enable_mcp,
-                        "model": generate_request.model,
-                        "narrative_perspective": generate_request.narrative_perspective,
-                    },
-                    db=bg_db,
-                    ai_service=bg_ai_service,
-                    tracker=tracker,
-                    user_id=bg_user_id,
-                    task_id=task_id,
-                )
-
-            except Exception as e:
-                logger.error(f"❌ 后台章节生成失败: {e}", exc_info=True)
-                await tracker.error(str(e))
-
-    await background_task_service.spawn_background_task(
-        task.id, user_id, _run_chapter_generation
-    )
-
-    return {
-        "task_id": task.id,
-        "task_type": "chapter_generate",
-        "status": "pending",
-        "message": "任务已创建，请通过 GET /api/tasks/{task_id} 查询进度"
-    }
-
-
-async def _run_chapter_generation_bg(
-    task_input: dict,
-    db: AsyncSession,
-    ai_service: AIService,
-    tracker,
-    user_id: str,
-    task_id: str,
-):
-    """后台执行章节生成（不使用SSE，直接生成并保存）"""
-    from app.services.chapter_context_service import (
-        OneToManyContextBuilder,
-        OneToOneContextBuilder
-    )
-
-    chapter_id = task_input["chapter_id"]
-    style_id = task_input.get("style_id")
-    target_word_count = task_input.get("target_word_count", 3000)
-    custom_model = task_input.get("model")
-    temp_narrative_perspective = task_input.get("narrative_perspective")
-    write_lock = await get_db_write_lock(user_id)
-
-    # === 加载阶段 ===
-    await tracker.loading("加载章节信息...", 0.2)
-
-    chapter_result = await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id)
-    )
-    current_chapter = chapter_result.scalar_one_or_none()
-    if not current_chapter:
-        await tracker.error("章节不存在")
-        return
-
-    await tracker.loading("加载项目信息...", 0.4)
-
-    project_result = await db.execute(
-        select(Project).where(Project.id == current_chapter.project_id)
-    )
-    project = project_result.scalar_one_or_none()
-    if not project:
-        await tracker.error("项目不存在")
-        return
-
-    outline_mode = project.outline_mode if project else 'one-to-many'
-
-    # 获取大纲
-    if current_chapter.outline_id:
-        outline_result = await db.execute(
-            select(Outline).where(Outline.id == current_chapter.outline_id)
-        )
-    else:
-        outline_result = await db.execute(
-            select(Outline)
-            .where(Outline.project_id == current_chapter.project_id)
-            .where(Outline.order_index == current_chapter.chapter_number)
-        )
-    outline = outline_result.scalar_one_or_none()
-
-    # 获取写作风格
-    style_content = ""
-    if style_id:
-        style_result = await db.execute(
-            select(WritingStyle).where(WritingStyle.id == style_id)
-        )
-        style = style_result.scalar_one_or_none()
-        if style and (style.user_id is None or style.user_id == user_id):
-            style_content = style.prompt_content or ""
-
-    # === 构建上下文 ===
-    if outline_mode == 'one-to-one':
-        context_builder = OneToOneContextBuilder(
-            memory_service=memory_service,
-            foreshadow_service=foreshadow_service
-        )
-        chapter_context = await context_builder.build(
-            chapter=current_chapter,
-            project=project,
-            outline=outline,
-            user_id=user_id,
-            db=db,
-            target_word_count=target_word_count
-        )
-    else:
-        context_builder = OneToManyContextBuilder(
-            memory_service=memory_service,
-            foreshadow_service=foreshadow_service
-        )
-        chapter_context = await context_builder.build(
-            chapter=current_chapter,
-            project=project,
-            outline=outline,
-            user_id=user_id,
-            db=db,
-            style_content=style_content,
-            target_word_count=target_word_count,
-            temp_narrative_perspective=temp_narrative_perspective
-        )
-
-    await tracker.loading("上下文构建完成", 0.8)
-
-    # 确定叙事人称
-    chapter_perspective = (
-        temp_narrative_perspective or
-        project.narrative_perspective or
-        '第三人称'
-    )
-
-    # === 准备提示词 ===
-    if outline_mode == 'one-to-one':
-        if chapter_context.continuation_point:
-            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE_NEXT", user_id, db)
-            base_prompt = PromptService.format_prompt(
-                template,
-                project_title=project.title,
-                chapter_number=current_chapter.chapter_number,
-                chapter_title=current_chapter.title,
-                chapter_outline=chapter_context.chapter_outline,
-                target_word_count=target_word_count,
-                genre=project.genre or '未设定',
-                narrative_perspective=chapter_perspective,
-                previous_chapter_content=chapter_context.continuation_point,
-                previous_chapter_summary=chapter_context.previous_chapter_summary or '（无上一章摘要）',
-                characters_info=chapter_context.chapter_characters or '暂无角色信息',
-                chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
-                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
-            )
-        else:
-            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE", user_id, db)
-            base_prompt = PromptService.format_prompt(
-                template,
-                project_title=project.title,
-                chapter_number=current_chapter.chapter_number,
-                chapter_title=current_chapter.title,
-                chapter_outline=chapter_context.chapter_outline,
-                target_word_count=target_word_count,
-                genre=project.genre or '未设定',
-                narrative_perspective=chapter_perspective,
-                characters_info=chapter_context.chapter_characters or '暂无角色信息',
-                chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
-                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
-            )
-    else:
-        if chapter_context.continuation_point:
-            previous_summary = chapter_context.previous_chapter_summary or "（无上一章摘要，请根据锚点续写）"
-            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_MANY_NEXT", user_id, db)
-            base_prompt = PromptService.format_prompt(
-                template,
-                project_title=project.title,
-                chapter_number=current_chapter.chapter_number,
-                chapter_title=current_chapter.title,
-                chapter_outline=chapter_context.chapter_outline,
-                target_word_count=target_word_count,
-                continuation_point=chapter_context.continuation_point,
-                genre=project.genre or '未设定',
-                narrative_perspective=chapter_perspective,
-                characters_info=chapter_context.chapter_characters or '暂无角色信息',
-                chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
-                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                previous_chapter_summary=previous_summary,
-                recent_chapters_context=chapter_context.recent_chapters_context or '',
-                relevant_memories=chapter_context.relevant_memories or ''
-            )
-        else:
-            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_MANY", user_id, db)
-            base_prompt = PromptService.format_prompt(
-                template,
-                project_title=project.title,
-                chapter_number=current_chapter.chapter_number,
-                chapter_title=current_chapter.title,
-                chapter_outline=chapter_context.chapter_outline,
-                target_word_count=target_word_count,
-                genre=project.genre or '未设定',
-                narrative_perspective=chapter_perspective,
-                characters_info=chapter_context.chapter_characters or '暂无角色信息',
-                chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
-                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
-            )
-
-    # 应用写作风格
-    if style_content:
-        prompt = WritingStyleManager.apply_style_to_prompt(base_prompt, style_content)
-    else:
-        prompt = base_prompt
-
-    # === 准备阶段 ===
-    await tracker.preparing("准备AI提示词...")
-
-    system_prompt_with_style = None
-    if style_content:
-        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
-
-{style_content}
-
-⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
-确保在整个章节创作过程中始终保持风格的一致性。"""
-
-    calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))
-
-    generate_kwargs = {
-        "prompt": prompt,
-        "system_prompt": system_prompt_with_style,
-        "tool_choice": "required",
-        "max_tokens": calculated_max_tokens
-    }
-    if custom_model:
-        generate_kwargs["model"] = custom_model
-
-    # === 生成阶段 ===
-    full_content = ""
-    chunk_count = 0
-
-    await tracker.generating(
-        current_chars=0,
-        estimated_total=target_word_count
-    )
-
-    async for chunk in ai_service.generate_text_stream(**generate_kwargs):
-        # 检查是否被取消
-        if chunk_count % 10 == 0 and await tracker.check_cancelled():
-            logger.info(f"🚫 后台章节生成被取消: {chapter_id}")
-            return
-
-        full_content += chunk
-        chunk_count += 1
-
-        # 每10个chunk更新一次进度
-        if chunk_count % 10 == 0:
-            await tracker.generating(
-                current_chars=len(full_content),
-                estimated_total=target_word_count,
-                message=f'正在创作中... 已生成 {len(full_content)} 字'
-            )
-
-        await asyncio.sleep(0)
-
-    # === 保存阶段 ===
-    await tracker.saving("正在保存章节...", 0.3)
-
-    async with write_lock:
-        # 重新获取章节（确保最新状态）
-        chapter_result = await db.execute(
-            select(Chapter).where(Chapter.id == chapter_id)
-        )
-        current_chapter = chapter_result.scalar_one_or_none()
-        if not current_chapter:
-            await tracker.error("保存时章节不存在")
-            return
-
-        old_word_count = current_chapter.word_count or 0
-        current_chapter.content = full_content
-        new_word_count = len(full_content)
-        current_chapter.word_count = new_word_count
-        current_chapter.status = "completed"
-
-        # 更新项目字数
-        project_result = await db.execute(
-            select(Project).where(Project.id == current_chapter.project_id)
-        )
-        project_obj = project_result.scalar_one_or_none()
-        if project_obj:
-            project_obj.current_words = (project_obj.current_words or 0) - old_word_count + new_word_count
-
-        # 记录生成历史
-        history = GenerationHistory(
-            project_id=current_chapter.project_id,
-            chapter_id=current_chapter.id,
-            prompt=f"创作章节: 第{current_chapter.chapter_number}章 {current_chapter.title}",
-            generated_content=full_content[:500] if len(full_content) > 500 else full_content,
-            model="default"
-        )
-        db.add(history)
-
-        await db.commit()
-
-    logger.info(f"✅ 后台创作章节 {chapter_id} 完成，共 {new_word_count} 字")
-
-    # 🔮 自动标记伏笔
-    try:
-        plant_result = await foreshadow_service.auto_plant_pending_foreshadows(
-            db=db,
-            project_id=current_chapter.project_id,
-            chapter_id=chapter_id,
-            chapter_number=current_chapter.chapter_number,
-            chapter_content=full_content
-        )
-        if plant_result.get('planted_count', 0) > 0:
-            logger.info(f"🔮 自动标记伏笔已埋入: {plant_result['planted_count']}个")
-    except Exception as plant_error:
-        logger.warning(f"⚠️ 自动标记伏笔埋入失败: {str(plant_error)}")
-
-    # 创建分析任务
-    analysis_task = AnalysisTask(
-        chapter_id=chapter_id,
-        user_id=user_id,
-        project_id=current_chapter.project_id,
-        status='pending',
-        progress=0
-    )
-    db.add(analysis_task)
-    await db.commit()
-    await db.refresh(analysis_task)
-
-    logger.info(f"📋 后台生成：已创建分析任务: {analysis_task.id}")
-
-    await asyncio.sleep(0.05)
-
-    # 启动后台分析
-    asyncio.create_task(
-        analyze_chapter_background(
-            chapter_id=chapter_id,
-            user_id=user_id,
-            project_id=current_chapter.project_id,
-            task_id=analysis_task.id,
-            ai_service=ai_service
         )
     )
 
@@ -3518,7 +3145,9 @@ async def batch_generate_chapters_in_order(
         user_id=user_id,
         ai_service=user_ai_service,
         custom_model=batch_request.model,
-        skill_key=batch_request.skill_key
+        skill_key=batch_request.skill_key,
+        reasoning_effort=batch_request.reasoning_effort,
+        narrative_perspective=batch_request.narrative_perspective
     )
     
     return BatchGenerateResponse(
@@ -3647,7 +3276,9 @@ async def execute_batch_generation_in_order(
     user_id: str,
     ai_service: AIService,
     custom_model: Optional[str] = None,
-    skill_key: Optional[str] = None
+    skill_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    narrative_perspective: Optional[str] = None
 ):
     """
     按顺序执行批量生成任务（后台任务）
@@ -3751,7 +3382,9 @@ async def execute_batch_generation_in_order(
                         write_lock=write_lock,
                         custom_model=custom_model,
                         previous_summary_context=last_generated_summary,
-                        skill_key=skill_key
+                        skill_key=skill_key,
+                        reasoning_effort=reasoning_effort,
+                        narrative_perspective=narrative_perspective
                     )
                     
                     # 更新上一章摘要，供下一章使用
@@ -3934,7 +3567,9 @@ async def generate_single_chapter_for_batch(
     write_lock: Lock,
     custom_model: Optional[str] = None,
     previous_summary_context: Optional[str] = None,
-    skill_key: Optional[str] = None
+    skill_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    narrative_perspective: Optional[str] = None
 ) -> Optional[str]:
     """
     为批量生成执行单个章节的生成（非流式）
@@ -4020,6 +3655,10 @@ async def generate_single_chapter_for_batch(
     logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memory_count', 0)} 条")
     logger.info(f"  - 总上下文长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
     
+    # 🎭 确定使用的叙事人称（批量生成：临时指定 > 项目默认 > 系统默认）
+    chapter_perspective = narrative_perspective or project.narrative_perspective or '第三人称'
+    logger.info(f"📝 批量生成 - 使用叙事人称: {chapter_perspective} (临时指定: {narrative_perspective}, 项目默认: {project.narrative_perspective})")
+
     # 🚀 根据大纲模式选择提示词模板（批量生成）
     # 统一使用 context_builder 构建的 chapter_context 结果，与单章生成保持一致
     if outline_mode == 'one-to-one':
@@ -4035,7 +3674,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 previous_chapter_content=chapter_context.continuation_point,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
@@ -4054,7 +3693,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -4082,7 +3721,7 @@ async def generate_single_chapter_for_batch(
                 target_word_count=target_word_count,
                 continuation_point=chapter_context.continuation_point,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -4101,7 +3740,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -4116,28 +3755,65 @@ async def generate_single_chapter_for_batch(
     
     # 🎨 将 Skill / 写作风格注入到系统提示词（批量生成）
     system_prompt_with_style = None
+    polishing_skill = None  # 润色类 Skill 暂存，用于两步流程
 
-    # ⚡ Skill 支持
+    # 🤖 自动模式：AI 通过 Function Calling 自主选择最适合的 Skill（批量生成）
+    if skill_key == "auto":
+        try:
+            from app.services.skill_tools_loader import auto_select_skill
+            auto_skill = await auto_select_skill(
+                ai_service=ai_service,
+                chapter_context=prompt,
+                model=custom_model,
+            )
+            if auto_skill:
+                skill_key = auto_skill
+                logger.info(f"🤖 批量生成 - AI 自动选择了 Skill: {skill_key}")
+            else:
+                skill_key = None
+                logger.info("🤖 批量生成 - AI 判断当前章节不需要使用 Skill")
+        except Exception as auto_err:
+            logger.warning(f"⚠️ 批量生成 - Skill 自动选择失败: {auto_err}")
+            skill_key = None
+
+    # ⚡ Skill 支持（批量生成）
     if skill_key:
         try:
             from app.services.skill_loader import get_all_skills_cached
             skills = get_all_skills_cached()
             skill = next((s for s in skills if s["template_key"] == skill_key), None)
             if skill:
+                skill_type = skill.get("skill_type", "generic")
                 skill_content = skill["content"]
                 skill_name = skill["template_name"]
-                system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+                
+                if skill_type == "polishing":
+                    # 润色类 Skill：先正常生成，完成后用 Skill 润色（两步流程）
+                    polishing_skill = skill
+                    if style_content:
+                        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                    logger.info(f"⚡ 批量生成 - 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
+                else:
+                    # 写作类/通用类 Skill：先放写作风格，Skill 放最后
+                    if style_content:
+                        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                    system_prompt_with_style = (system_prompt_with_style or "") + f"""
+
+【⚡ Skill 工作流：{skill_name}】
 
 {skill_content}
 
 ⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
-                if style_content:
-                    system_prompt_with_style += f"""
-
-【🎨 写作风格要求 - 补充】
-
-{style_content}"""
-                logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+                    logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
             else:
                 logger.warning(f"⚠️ 批量生成 - 未找到 Skill: {skill_key}")
         except Exception as skill_err:
@@ -4156,7 +3832,7 @@ async def generate_single_chapter_for_batch(
     # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
     # 同时设置上限防止过长，下限确保基本可用
     calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
+    calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))  # 限制在 2000-32000 之间（思考模式需要更多空间）
     logger.info(f"📊 批量生成 - 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
     
     # 非流式生成内容
@@ -4172,10 +3848,49 @@ async def generate_single_chapter_for_batch(
     if custom_model:
         generate_kwargs["model"] = custom_model
         logger.info(f"  批量生成使用自定义模型: {custom_model}")
+    if reasoning_effort:
+        generate_kwargs["reasoning_effort"] = reasoning_effort
+        # 思考模式下推理 token 会占用 max_tokens，需要 3 倍确保输出不被截断
+        generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 3, 128000)
+        logger.info(f"  批量生成 🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
     
     # 批量生成中的流式生成（非SSE，不需要修改进度显示）
     async for chunk in ai_service.generate_text_stream(**generate_kwargs):
         full_content += chunk
+    
+    # === 润色阶段（两步流程：润色类 Skill - 批量生成） ===
+    if polishing_skill:
+        polishing_content = polishing_skill["content"]
+        polishing_name = polishing_skill["template_name"]
+        logger.info(f"✨ 批量生成两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
+        
+        polishing_system = f"""{polishing_content}"""
+
+        polishing_user_prompt = f"""请对以下章节内容执行润色，只做局部修改，不要整段重写。直接输出润色后的完整正文，不要任何解释。
+
+{full_content}"""
+
+        polishing_max_tokens = max(2000, min(int(len(full_content) * 1.5), 12000))
+        
+        polishing_kwargs = {
+            "prompt": polishing_user_prompt,
+            "system_prompt": polishing_system,
+            "max_tokens": polishing_max_tokens,
+        }
+        if custom_model:
+            polishing_kwargs["model"] = custom_model
+        if reasoning_effort:
+            polishing_kwargs["reasoning_effort"] = reasoning_effort
+        
+        polished_content = ""
+        async for chunk in ai_service.generate_text_stream(**polishing_kwargs):
+            polished_content += chunk
+        
+        if polished_content.strip():
+            full_content = polished_content.strip()
+            logger.info(f"✨ 批量生成润色完成：{len(full_content)}字")
+        else:
+            logger.warning(f"⚠️ 批量生成润色结果为空，使用原始内容")
     
     # 更新章节内容到数据库（使用锁保护）
     async with write_lock:

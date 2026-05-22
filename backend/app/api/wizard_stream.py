@@ -777,7 +777,11 @@ async def characters_generator(
                         characters_data = [characters_data]
                     
                     # 严格验证生成数量是否精确匹配
-                    if len(characters_data) != current_batch_size:
+                    if len(characters_data) > current_batch_size:
+                        # AI多生成了，取前N个即可
+                        logger.warning(f"批次{batch_idx+1}生成数量偏多: 期望{current_batch_size}个, 实际{len(characters_data)}个, 截取前{current_batch_size}个")
+                        characters_data = characters_data[:current_batch_size]
+                    elif len(characters_data) < current_batch_size:
                         error_msg = f"批次{batch_idx+1}生成数量不正确: 期望{current_batch_size}个, 实际{len(characters_data)}个"
                         logger.error(error_msg)
                         
@@ -1440,10 +1444,26 @@ async def outline_generator(
         # 根据项目的大纲模式决定是否自动创建章节
         created_chapters = []
         if project.outline_mode == 'one-to-one':
-            # 一对一模式：自动为每个大纲创建对应的章节
+            # 一对一模式：自动为每个大纲创建对应的章节（检查是否已存在，避免重复）
             yield await tracker.saving("一对一模式：自动创建章节...", 0.7)
-            
+
+            # 先查询已存在的章节，避免重复创建
+            existing_chapters_result = await db.execute(
+                select(Chapter).where(Chapter.project_id == project_id)
+            )
+            existing_chapters = existing_chapters_result.scalars().all()
+            existing_chapter_numbers = {ch.chapter_number for ch in existing_chapters}
+
+            created_count = 0
+            skipped_count = 0
+
             for outline in created_outlines:
+                # 检查是否已存在相同chapter_number的章节
+                if outline.order_index in existing_chapter_numbers:
+                    skipped_count += 1
+                    logger.info(f"一对一模式：跳过大纲 {outline.title}（序号{outline.order_index}），章节已存在")
+                    continue
+
                 chapter = Chapter(
                     project_id=project_id,
                     title=outline.title,
@@ -1454,13 +1474,16 @@ async def outline_generator(
                 )
                 db.add(chapter)
                 created_chapters.append(chapter)
-            
-            await db.flush()
-            for chapter in created_chapters:
-                await db.refresh(chapter)
-            
-            logger.info(f"✅ 一对一模式：自动创建了{len(created_chapters)}个章节")
-            yield await tracker.saving(f"已自动创建{len(created_chapters)}个章节", 0.9)
+                existing_chapter_numbers.add(outline.order_index)  # 防止同一批次重复
+                created_count += 1
+
+            if created_chapters:
+                await db.flush()
+                for chapter in created_chapters:
+                    await db.refresh(chapter)
+
+            logger.info(f"✅ 一对一模式：自动创建了{created_count}个章节（跳过{skipped_count}个已存在的章节）")
+            yield await tracker.saving(f"已自动创建{created_count}个章节（跳过{skipped_count}个已存在的章节）", 0.9)
         else:
             # 一对多模式：跳过自动创建，用户可手动展开
             yield await tracker.saving("细化模式：跳过自动创建章节", 0.9)

@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
+import re
 
 from app.models.character import Character
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
@@ -12,6 +13,36 @@ from app.services.prompt_service import PromptService
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _normalize_character_name(name: str) -> str:
+    """归一化角色名称：去除括号后缀（如「影笔（独立制图师）」→「影笔」）"""
+    # 去除中文括号和英文括号及其内容
+    normalized = re.sub(r'[（(][^）)]*[）)]', '', name).strip()
+    return normalized if normalized else name
+
+
+# 组织名单字后缀
+_ORG_SINGLE_SUFFIXES = frozenset(
+    "帮派门会局阁宗族堂殿宫庄寨堡楼院社团盟党军营队所署寺观庵朝庭府"
+)
+# 组织名双字后缀（如「法则探索者小队」「暗影战队」）
+_ORG_DOUBLE_SUFFIXES = (
+    "小队", "部队", "分队", "战队", "纵队", "小组", "分会", "分部",
+    "总部", "支部", "商会", "公会", "学派", "教派", "家族", "皇朝",
+)
+
+
+def _looks_like_organization(name: str) -> bool:
+    """根据名称推断是否为组织（如「天机阁」「法则探索者小队」「青龙帮」）"""
+    n = name.strip()
+    if len(n) < 2:
+        return False
+    if n[-1] in _ORG_SINGLE_SUFFIXES:
+        return True
+    if len(n) >= 3 and n[-2:] in _ORG_DOUBLE_SUFFIXES:
+        return True
+    return False
 
 
 class AutoCharacterService:
@@ -286,9 +317,9 @@ class AutoCharacterService:
                 if not target_name:
                     continue
                 
-                # 查找目标角色
+                # 查找目标角色（使用归一化名称匹配）
                 target_char = next(
-                    (c for c in existing_characters if c.name == target_name),
+                    (c for c in existing_characters if _normalize_character_name(c.name) == _normalize_character_name(target_name)),
                     None
                 )
                 
@@ -378,8 +409,10 @@ class AutoCharacterService:
         logger.info(f"🔍 【角色校验】开始校验大纲中提到的角色是否存在...")
         
         # 1. 从所有大纲的structure中提取角色名称（兼容新旧格式）
-        all_character_names = set()
-        character_context = {}  # 记录角色出现的上下文（大纲摘要）
+        # 使用归一化名称去重：如「影笔」和「影笔（独立制图师）」视为同一角色
+        all_character_names = set()  # 存储归一化后的名称
+        raw_to_normalized = {}  # 原始名称 -> 归一化名称
+        character_context = {}  # 归一化名称 -> 上下文列表
         
         for outline_item in outline_data_list:
             if isinstance(outline_item, dict):
@@ -393,21 +426,33 @@ class AutoCharacterService:
                         if isinstance(char_entry, dict):
                             entry_type = char_entry.get("type", "character")
                             entry_name = char_entry.get("name", "")
-                            # 只处理 character 类型，跳过 organization
+                            # 跳过 organization 类型或空名
                             if entry_type == "organization" or not entry_name.strip():
                                 continue
-                            name = entry_name.strip()
+                            # 智能推断：AI误标为character的组织名（如「法则探索者小队」）
+                            if _looks_like_organization(entry_name):
+                                logger.info(f"  🔍 智能推断: '{entry_name}' 名称像组织，跳过角色创建（交由组织校验处理）")
+                                continue
+                            raw_name = entry_name.strip()
                         # 旧格式：纯字符串
                         elif isinstance(char_entry, str) and char_entry.strip():
-                            name = char_entry.strip()
+                            raw_name = char_entry.strip()
+                            # 旧格式也做智能推断
+                            if _looks_like_organization(raw_name):
+                                logger.info(f"  🔍 智能推断: '{raw_name}' 名称像组织，跳过角色创建")
+                                continue
                         else:
                             continue
                         
-                        all_character_names.add(name)
-                        # 收集角色出现的上下文
-                        if name not in character_context:
-                            character_context[name] = []
-                        character_context[name].append(f"《{title}》: {summary[:200]}")
+                        # 归一化名称，去除括号后缀
+                        normalized = _normalize_character_name(raw_name)
+                        raw_to_normalized[raw_name] = normalized
+                        all_character_names.add(normalized)
+                        
+                        # 收集角色出现的上下文（按归一化名称合并）
+                        if normalized not in character_context:
+                            character_context[normalized] = []
+                        character_context[normalized].append(f"《{title}》: {summary[:200]}")
         
         if not all_character_names:
             logger.info("🔍 【角色校验】大纲中未提到任何角色，跳过校验")
@@ -424,9 +469,10 @@ class AutoCharacterService:
             select(Character).where(Character.project_id == project_id)
         )
         existing_characters = existing_result.scalars().all()
-        existing_names = {char.name for char in existing_characters}
+        # 使用归一化名称匹配，这样「影笔」和「影笔（独立制图师）」不会重复
+        existing_names = {_normalize_character_name(char.name) for char in existing_characters}
         
-        # 3. 找出缺失的角色
+        # 3. 找出缺失的角色（基于归一化名称匹配）
         missing_names = all_character_names - existing_names
         
         if not missing_names:
@@ -470,7 +516,8 @@ class AutoCharacterService:
                     "name": char_name,
                     "role_description": f"在大纲中出现的角色，出现场景：\n{context_text}",
                     "suggested_role_type": "supporting",
-                    "importance": "medium"
+                    "importance": "medium",
+                    "organization_check": "⚠️ 请先判断该名称是个人角色还是组织/势力/团体。如果该名称代表的是一个组织（如门派、小队、公司、帮会、机构等），请设置 is_organization: true 并按组织格式返回数据。"
                 }
                 
                 logger.info(f"  🤖 [{idx+1}/{len(missing_names)}] 生成角色详情: {char_name}")
@@ -484,6 +531,10 @@ class AutoCharacterService:
                     user_id=user_id,
                     enable_mcp=enable_mcp
                 )
+                
+                # 检查AI是否判定该名称实际为组织
+                if character_data.get("is_organization", False):
+                    logger.info(f"  🏛️ AI判定 '{char_name}' 为组织/势力，将按组织格式创建")
                 
                 # 确保使用大纲中的角色名称
                 character_data['name'] = char_name

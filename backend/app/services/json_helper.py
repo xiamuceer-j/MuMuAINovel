@@ -319,6 +319,75 @@ def _fix_all_invalid_escapes(text: str) -> str:
     return ''.join(result)
 
 
+def _fix_unescaped_quotes_by_error(text: str, max_fixes: int = 50) -> str:
+    """
+    基于 json.JSONDecodeError 的错误位置，迭代修复未转义的引号。
+    
+    当 _fix_json_string_values 的启发式判断失败时（_is_content_quote 误判），
+    此函数利用 JSON 解析器提供的精确错误位置来定位问题并修复。
+    
+    常见场景：AI 在字符串值内写入 "content", "more content" 这样的模式，
+    _is_content_quote 可能将其误判为结构引号，导致字符串提前终止。
+    
+    修复策略：在错误位置前找到最近的未转义引号，将其转义。
+    """
+    for _ in range(max_fixes):
+        try:
+            json.loads(text)
+            return text  # 解析成功
+        except json.JSONDecodeError as e:
+            if e.pos is None or e.pos >= len(text):
+                break
+            
+            pos = e.pos
+            
+            # 从错误位置向前搜索最近的未转义引号
+            # 跳过空格和换行
+            search_pos = pos - 1
+            while search_pos >= 0 and text[search_pos] in ' \t\n\r':
+                search_pos -= 1
+            
+            if search_pos < 0:
+                break
+            
+            # 如果错误位置的字符是引号（Unexpected '"'），直接转义它
+            if text[search_pos] == '"':
+                # 检查是否已被转义
+                num_bs = 0
+                k = search_pos - 1
+                while k >= 0 and text[k] == '\\':
+                    num_bs += 1
+                    k -= 1
+                if num_bs % 2 == 0:
+                    # 未转义的引号，转义它
+                    text = text[:search_pos] + '\\"' + text[search_pos + 1:]
+                    logger.debug(f"   🔧 在位置 {search_pos} 转义了未转义的引号")
+                    continue
+            
+            # 否则从错误位置向前找引号
+            found = False
+            for j in range(pos - 1, max(0, pos - 500), -1):
+                if text[j] == '"':
+                    num_bs = 0
+                    k = j - 1
+                    while k >= 0 and text[k] == '\\':
+                        num_bs += 1
+                        k -= 1
+                    if num_bs % 2 == 0:
+                        text = text[:j] + '\\"' + text[j + 1:]
+                        logger.debug(f"   🔧 在位置 {j} 转义了未转义的引号（向前搜索）")
+                        found = True
+                        break
+            if found:
+                continue
+            
+            # 无法修复
+            logger.debug(f"   ⚠️ 无法定位可修复的引号，错误位置: {pos}")
+            break
+    
+    return text
+
+
 def _fix_multiple_objects_as_value(text: str) -> str:
     """
     修复AI生成的JSON中，多个对象作为属性值但未合并的问题。
@@ -518,9 +587,16 @@ def clean_json_response(text: str) -> str:
                     json.loads(result)
                     logger.info(f"✅ 二次修复后JSON验证成功")
                 except json.JSONDecodeError as e3:
-                    logger.error(f"❌ 所有修复后JSON仍然无效: {e3}")
-                    logger.debug(f"   结果预览: {result[:500]}")
-                    logger.debug(f"   结果结尾: ...{result[-200:]}")
+                    # 修复4：基于错误位置迭代修复未转义引号
+                    logger.warning(f"⚠️ 继续尝试基于错误位置修复未转义引号...")
+                    result = _fix_unescaped_quotes_by_error(result)
+                    try:
+                        json.loads(result)
+                        logger.info(f"✅ 基于错误位置修复后JSON验证成功")
+                    except json.JSONDecodeError as e4:
+                        logger.error(f"❌ 所有修复后JSON仍然无效: {e4}")
+                        logger.debug(f"   结果预览: {result[:500]}")
+                        logger.debug(f"   结果结尾: ...{result[-200:]}")
         
         return result
         

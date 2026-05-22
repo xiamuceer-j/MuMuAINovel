@@ -289,7 +289,8 @@ export function useChapterSync() {
     onProgressUpdate?: (message: string, progress: number) => void,
     model?: string,
     narrativePerspective?: string,
-    skillKey?: string
+    skillKey?: string,
+    reasoningEffort?: string
   ) => {
     try {
       // 使用fetch处理流式响应
@@ -303,7 +304,8 @@ export function useChapterSync() {
           target_word_count: targetWordCount,
           model: model,
           narrative_perspective: narrativePerspective,
-          skill_key: skillKey
+          skill_key: skillKey,
+          reasoning_effort: reasoningEffort
         }),
       });
 

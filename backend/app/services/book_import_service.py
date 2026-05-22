@@ -249,6 +249,7 @@ class BookImportService:
         payload: BookImportApplyRequest,
         db: AsyncSession,
         progress_callback: Any = None,
+        ai_service: Optional[AIService] = None,
     ) -> BookImportApplyResponse:
         """
         与 apply_import 相同的落库逻辑，但通过 progress_callback 推送细粒度进度。
@@ -333,6 +334,7 @@ class BookImportService:
                     db=db,
                     user_id=user_id,
                     project=project,
+                    ai_service=ai_service,
                     progress_callback=progress_callback,
                     progress_range=(22, 40),
                     raise_on_error=True,
@@ -355,6 +357,7 @@ class BookImportService:
                     db=db,
                     user_id=user_id,
                     project=project,
+                    ai_service=ai_service,
                     progress_callback=progress_callback,
                     progress_range=(42, 65),
                 )
@@ -378,6 +381,7 @@ class BookImportService:
                     user_id=user_id,
                     project=project,
                     count=character_count_target,
+                    ai_service=ai_service,
                     progress_callback=progress_callback,
                     progress_range=(67, 92),
                 )
@@ -447,6 +451,7 @@ class BookImportService:
         steps_to_retry: list[str],
         db: AsyncSession,
         progress_callback: Any = None,
+        ai_service: Optional[AIService] = None,
     ) -> dict:
         """
         仅重试之前导入时失败的AI生成步骤。
@@ -493,6 +498,7 @@ class BookImportService:
                             db=db,
                             user_id=user_id,
                             project=project,
+                            ai_service=ai_service,
                             progress_callback=progress_callback,
                             progress_range=(step_start_pct, step_end_pct),
                             raise_on_error=True,
@@ -516,6 +522,7 @@ class BookImportService:
                             db=db,
                             user_id=user_id,
                             project=project,
+                            ai_service=ai_service,
                             progress_callback=progress_callback,
                             progress_range=(step_start_pct, step_end_pct),
                         )
@@ -540,6 +547,7 @@ class BookImportService:
                             user_id=user_id,
                             project=project,
                             count=character_count_target,
+                            ai_service=ai_service,
                             progress_callback=progress_callback,
                             progress_range=(step_start_pct, step_end_pct),
                         )
@@ -1674,6 +1682,7 @@ class BookImportService:
         db: AsyncSession,
         user_id: str,
         project: Project,
+        ai_service: Optional[AIService] = None,
         progress_callback: Any = None,
         progress_range: tuple[int, int] = (0, 100),
         raise_on_error: bool = False,
@@ -1687,7 +1696,7 @@ class BookImportService:
 
         try:
             await _notify("🌍 正在初始化AI服务...", 0.1)
-            ai_service = await self._build_user_ai_service(db=db, user_id=user_id)
+            ai_service = ai_service or await self._build_user_ai_service(db=db, user_id=user_id)
 
             await _notify("🌍 正在准备世界观提示词...", 0.2)
             template = await PromptService.get_template("WORLD_BUILDING", user_id, db)
@@ -1742,6 +1751,7 @@ class BookImportService:
         db: AsyncSession,
         user_id: str,
         project: Project,
+        ai_service: Optional[AIService] = None,
         progress_callback: Any = None,
         progress_range: tuple[int, int] = (0, 100),
     ) -> int:
@@ -1753,7 +1763,7 @@ class BookImportService:
                 await progress_callback(msg, p)
 
         await _notify("💼 正在初始化AI服务...", 0.1)
-        ai_service = await self._build_user_ai_service(db=db, user_id=user_id)
+        ai_service = ai_service or await self._build_user_ai_service(db=db, user_id=user_id)
 
         await _notify("💼 正在准备职业体系提示词...", 0.2)
         template = await PromptService.get_template("CAREER_SYSTEM_GENERATION", user_id, db)
@@ -1841,6 +1851,7 @@ class BookImportService:
         user_id: str,
         project: Project,
         count: int,
+        ai_service: Optional[AIService] = None,
         progress_callback: Any = None,
         progress_range: tuple[int, int] = (0, 100),
     ) -> int:
@@ -1858,7 +1869,7 @@ class BookImportService:
                 return default
 
         await _notify("👥 正在初始化AI服务...", 0.05)
-        ai_service = await self._build_user_ai_service(db=db, user_id=user_id)
+        ai_service = ai_service or await self._build_user_ai_service(db=db, user_id=user_id)
 
         # 控制数量区间，避免过多生成
         target_count = max(5, min(count, 20))

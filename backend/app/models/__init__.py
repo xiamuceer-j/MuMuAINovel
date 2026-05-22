@@ -19,6 +19,7 @@ from app.models.prompt_template import PromptTemplate
 from app.models.foreshadow import Foreshadow
 from app.models.prompt_workshop import PromptWorkshopItem, PromptSubmission, PromptWorkshopLike
 from app.models.background_task import BackgroundTask
+from app.models.announcement import Announcement
 
 __all__ = [
     "Project",
@@ -48,5 +49,6 @@ __all__ = [
     "PromptWorkshopItem",
     "PromptSubmission",
     "PromptWorkshopLike",
-    "BackgroundTask"
+    "BackgroundTask",
+    "Announcement"
 ]

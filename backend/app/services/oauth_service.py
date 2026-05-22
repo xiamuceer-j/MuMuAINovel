@@ -1,10 +1,13 @@
 """
 LinuxDO OAuth2 服务
 """
+import logging
 import httpx
 import secrets
 from typing import Optional, Dict, Any
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LinuxDOOAuthService:
@@ -19,12 +22,11 @@ class LinuxDOOAuthService:
         self.client_id = settings.LINUXDO_CLIENT_ID
         self.client_secret = settings.LINUXDO_CLIENT_SECRET
         self.redirect_uri = settings.LINUXDO_REDIRECT_URI
+        self.proxy_url = settings.LINUXDO_PROXY_URL
         
         # 如果未配置，使用默认值（本地开发）
         if not self.redirect_uri:
             self.redirect_uri = "http://localhost:8000/api/auth/callback"
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(
                 "⚠️  LINUXDO_REDIRECT_URI 未配置，使用默认值: http://localhost:8000/api/auth/callback\n"
                 "如需使用 OAuth 登录，请在 .env 文件中配置：\n"
@@ -34,12 +36,23 @@ class LinuxDOOAuthService:
         
         # 警告：检查是否使用了localhost（在非开发环境）
         if not settings.debug and "localhost" in self.redirect_uri.lower():
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(
                 f"⚠️  生产环境检测到使用 localhost 作为回调地址: {self.redirect_uri}\n"
                 "这可能导致OAuth回调失败！请使用实际的域名或服务器IP。"
             )
+
+        if self.proxy_url:
+            logger.info("LinuxDO OAuth 已启用专用代理: %s", self.proxy_url)
+
+    def _client_options(self, **overrides) -> Dict[str, Any]:
+        """构建 LinuxDO 专用 HTTP 客户端参数。"""
+        options: Dict[str, Any] = {
+            "trust_env": False,
+        }
+        if self.proxy_url:
+            options["proxy"] = self.proxy_url
+        options.update(overrides)
+        return options
         
     def generate_state(self) -> str:
         """生成随机 state 参数"""
@@ -85,7 +98,7 @@ class LinuxDOOAuthService:
         }
         
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(**self._client_options(timeout=30.0)) as client:
                 response = await client.post(
                     self.TOKEN_URL,
                     data=data,
@@ -122,7 +135,7 @@ class LinuxDOOAuthService:
             }
             
             # 不自动处理编码，让 httpx 自动解压
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            async with httpx.AsyncClient(**self._client_options(follow_redirects=True, timeout=30.0)) as client:
                 response = await client.get(
                     self.USERINFO_URL,
                     headers=headers

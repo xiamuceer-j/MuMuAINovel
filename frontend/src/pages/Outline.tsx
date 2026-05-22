@@ -598,10 +598,10 @@ export default function Outline() {
     let loadedModels: Array<{ value: string, label: string }> = [];
     let defaultModel: string | undefined = undefined;
 
-    if (api_key && api_base_url) {
+    if (api_base_url) {
       try {
         const modelsResponse = await fetch(
-          `/api/settings/models?api_key=${encodeURIComponent(api_key)}&api_base_url=${encodeURIComponent(api_base_url)}&provider=${api_provider}`
+          `/api/settings/models?api_key=${encodeURIComponent(api_key || '')}&api_base_url=${encodeURIComponent(api_base_url)}&provider=${api_provider}`
         );
         if (modelsResponse.ok) {
           const data = await modelsResponse.json();

@@ -19,6 +19,7 @@ from app.schemas.book_import import (
     BookImportTaskStatusResponse,
 )
 from app.services.book_import_service import book_import_service
+from app.api.settings import get_user_ai_service_from_db
 from app.utils.sse_response import SSEResponse, create_sse_response
 
 router = APIRouter(prefix="/book-import", tags=["拆书导入"])
@@ -161,12 +162,14 @@ async def apply_book_import_stream(
     async def _run_import() -> None:
         """在后台任务中执行导入并通过队列推送进度"""
         try:
+            ai_service = await get_user_ai_service_from_db(user_id, db)
             result = await book_import_service.apply_import_stream(
                 task_id=task_id,
                 user_id=user_id,
                 payload=payload,
                 db=db,
                 progress_callback=_progress_callback,
+                ai_service=ai_service,
             )
 
             # 发送结果
@@ -234,12 +237,14 @@ async def retry_failed_steps_stream(
 
     async def _run_retry() -> None:
         try:
+            ai_service = await get_user_ai_service_from_db(user_id, db)
             result = await book_import_service.retry_failed_steps_stream(
                 task_id=task_id,
                 user_id=user_id,
                 steps_to_retry=payload.steps,
                 db=db,
                 progress_callback=_progress_callback,
+                ai_service=ai_service,
             )
 
             await progress_queue.put(await SSEResponse.send_result(result))

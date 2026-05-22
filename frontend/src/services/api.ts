@@ -38,6 +38,11 @@ import type {
   PromptWorkshopItem,
   PromptSubmission,
   PromptSubmissionCreate,
+  Announcement,
+  AnnouncementCreate,
+  AnnouncementListResponse,
+  AnnouncementStatusResponse,
+  AnnouncementUpdate,
   MCPPlugin,
   MCPPluginCreate,
   MCPPluginUpdate,
@@ -230,10 +235,10 @@ export const settingsApi = {
 
   deleteSettings: () => api.delete<unknown, { message: string; user_id: string }>('/settings'),
 
-  getAvailableModels: (params: { api_key: string; api_base_url: string; provider: string }) =>
+  getAvailableModels: (params: { api_key?: string; api_base_url?: string; provider: string }) =>
     api.get<unknown, { provider: string; models: Array<{ value: string; label: string; description: string }>; count?: number }>('/settings/models', { params }),
 
-  testApiConnection: (params: { api_key: string; api_base_url: string; provider: string; llm_model: string; temperature?: number; max_tokens?: number }) =>
+  testApiConnection: (params: { api_key?: string; api_base_url?: string; provider: string; llm_model: string; temperature?: number; max_tokens?: number }) =>
     api.post<unknown, {
       success: boolean;
       message: string;
@@ -255,7 +260,7 @@ export const settingsApi = {
       model?: string;
     }>('/settings/cover/test', params),
 
-  checkFunctionCalling: (params: { api_key: string; api_base_url: string; provider: string; llm_model: string }) =>
+  checkFunctionCalling: (params: { api_key?: string; api_base_url?: string; provider: string; llm_model: string }) =>
     api.post<unknown, {
       success: boolean;
       supported: boolean;
@@ -915,6 +920,35 @@ export const promptWorkshopApi = {
         total_likes: number;
       };
     }>('/prompt-workshop/admin/stats'),
+};
+
+export const announcementApi = {
+  getStatus: () =>
+    api.get<unknown, AnnouncementStatusResponse>('/announcements/status'),
+
+  list: (params?: { page?: number; limit?: number }) =>
+    api.get<unknown, AnnouncementListResponse>('/announcements', { params }),
+
+  sync: (params?: { since?: string; limit?: number }) =>
+    api.get<unknown, AnnouncementListResponse>('/announcements/sync', { params }),
+
+  adminList: (params?: { status?: string; q?: string; page?: number; limit?: number; include_expired?: boolean }) =>
+    api.get<unknown, AnnouncementListResponse>('/announcements/admin/items', { params }),
+
+  adminCreate: (data: AnnouncementCreate) =>
+    api.post<unknown, { success: boolean; item: Announcement }>('/announcements/admin/items', data),
+
+  adminUpdate: (id: string, data: AnnouncementUpdate) =>
+    api.put<unknown, { success: boolean; item: Announcement }>(`/announcements/admin/items/${id}`, data),
+
+  adminDelete: (id: string) =>
+    api.delete<unknown, { success: boolean; message: string }>(`/announcements/admin/items/${id}`),
+
+  adminPublish: (id: string) =>
+    api.post<unknown, { success: boolean; item: Announcement }>(`/announcements/admin/items/${id}/publish`),
+
+  adminHide: (id: string) =>
+    api.post<unknown, { success: boolean; item: Announcement }>(`/announcements/admin/items/${id}/hide`),
 };
 
 export const polishApi = {

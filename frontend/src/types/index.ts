@@ -1167,6 +1167,69 @@ export interface PromptWorkshopAdminStats {
   total_likes: number;
 }
 
+// ==================== 公告类型定义 ====================
+
+export type AnnouncementLevel = 'info' | 'success' | 'warning' | 'error';
+export type AnnouncementStatus = 'draft' | 'published' | 'hidden';
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  summary?: string | null;
+  level: AnnouncementLevel;
+  status?: AnnouncementStatus;
+  pinned: boolean;
+  author_id?: string | null;
+  author_name?: string | null;
+  publish_at?: string | null;
+  expire_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface AnnouncementCreate {
+  title: string;
+  content: string;
+  summary?: string;
+  level?: AnnouncementLevel;
+  status?: AnnouncementStatus;
+  pinned?: boolean;
+  publish_at?: string;
+  expire_at?: string;
+}
+
+export interface AnnouncementUpdate {
+  title?: string;
+  content?: string;
+  summary?: string;
+  level?: AnnouncementLevel;
+  status?: AnnouncementStatus;
+  pinned?: boolean;
+  publish_at?: string | null;
+  expire_at?: string | null;
+}
+
+export interface AnnouncementListResponse {
+  success: boolean;
+  data: {
+    total: number;
+    page: number;
+    limit: number;
+    items: Announcement[];
+    active_ids?: string[];
+    latest_updated_at?: string | null;
+    server_time?: string;
+  };
+}
+
+export interface AnnouncementStatusResponse {
+  mode: 'client' | 'server' | string;
+  instance_id: string;
+  cloud_url?: string;
+  cloud_connected?: boolean;
+}
+
 // 提示词工坊分类常量
 export const PROMPT_CATEGORIES: Record<string, string> = {
   general: '通用',

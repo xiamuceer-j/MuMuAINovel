@@ -12,6 +12,7 @@ from app.services.plot_analyzer import get_plot_analyzer
 from app.services.foreshadow_service import foreshadow_service
 from app.services.ai_service import create_user_ai_service
 from app.models.settings import Settings
+from app.api.settings import resolve_runtime_ai_config
 from app.logger import get_logger
 from app.api.common import verify_project_access
 import uuid
@@ -56,17 +57,19 @@ async def analyze_chapter(
             raise HTTPException(status_code=400, detail="章节内容为空,无法分析")
         
         # 获取用户AI设置
-        settings_result = await db.execute(select(Settings))
+        settings_result = await db.execute(select(Settings).where(Settings.user_id == user_id))
         settings = settings_result.scalar_one_or_none()
         
         if not settings:
             raise HTTPException(status_code=400, detail="请先配置AI设置")
         
+        runtime_config = resolve_runtime_ai_config(settings.api_provider, settings.api_key, settings.api_base_url)
+
         # 创建AI服务
         ai_service = create_user_ai_service(
-            api_provider=settings.api_provider,
-            api_key=settings.api_key,
-            api_base_url=settings.api_base_url,
+            api_provider=runtime_config["api_provider"],
+            api_key=runtime_config["api_key"],
+            api_base_url=runtime_config["api_base_url"],
             model_name=settings.llm_model,
             temperature=settings.temperature,
             max_tokens=settings.max_tokens

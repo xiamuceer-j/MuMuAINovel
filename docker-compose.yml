@@ -91,7 +91,7 @@ services:
       - DATABASE_POOL_PRE_PING=${DATABASE_POOL_PRE_PING:-True}
       - DATABASE_POOL_USE_LIFO=${DATABASE_POOL_USE_LIFO:-True}
       
-      # 代理配置（可选）
+      # 全局代理配置（可选）
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1}
@@ -112,6 +112,7 @@ services:
       - LINUXDO_CLIENT_ID=${LINUXDO_CLIENT_ID:-11111}
       - LINUXDO_CLIENT_SECRET=${LINUXDO_CLIENT_SECRET:-11111}
       - LINUXDO_REDIRECT_URI=${LINUXDO_REDIRECT_URI:-http://localhost:8000/api/auth/linuxdo/callback}
+      - LINUXDO_PROXY_URL=${LINUXDO_PROXY_URL:-}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8000}
       
       # 本地账户登录配置

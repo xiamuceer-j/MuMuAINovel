@@ -413,8 +413,8 @@ export default function MCPPluginsPage() {
     try {
       const settings = await settingsApi.getSettings();
       
-      if (!settings.api_key || !settings.llm_model) {
-        message.warning('请先在设置页面配置 API Key 和模型');
+      if (!settings.llm_model) {
+        message.warning('请先在设置页面配置模型');
         return;
       }
 

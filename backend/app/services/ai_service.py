@@ -28,10 +28,18 @@ logger = get_logger(__name__)
 
 
 def normalize_provider(provider: Optional[str]) -> Optional[str]:
-    """标准化 provider 名称，兼容渠道别名。"""
-    if provider == "mumu":
+    """标准化 provider 名称，兼容 OpenAI 格式渠道别名。
+
+    内置适配器（例如 Xiaomi MiMo）应在 API 层解析为底层兼容 provider，
+    AIService 只接收可直接初始化的 provider。
+    """
+    if provider is None:
+        return None
+
+    normalized = provider.lower().strip()
+    if normalized == "mumu":
         return "openai"
-    return provider
+    return normalized
 
 
 class AIService:
@@ -86,7 +94,8 @@ class AIService:
         db_session: Optional[Any] = None,
         enable_mcp: bool = True,
     ):
-        self.api_provider = normalize_provider(api_provider or app_settings.default_ai_provider)
+        self.raw_api_provider = (api_provider or app_settings.default_ai_provider or "openai").lower().strip()
+        self.api_provider = normalize_provider(self.raw_api_provider)
         self.default_model = default_model or app_settings.default_model
         self.default_temperature = default_temperature or app_settings.default_temperature
         self.default_max_tokens = default_max_tokens or app_settings.default_max_tokens
@@ -104,11 +113,18 @@ class AIService:
         self._anthropic_provider: Optional[AnthropicProvider] = None
         self._gemini_provider: Optional[GeminiProvider] = None
         
-        # 初始化 OpenAI
-        openai_key = api_key if self.api_provider == "openai" else app_settings.openai_api_key
+        # 初始化 OpenAI 兼容接口
+        openai_key = None
+        openai_base_url = None
+        if self.api_provider == "openai":
+            openai_key = api_key or app_settings.openai_api_key
+            openai_base_url = api_base_url or app_settings.openai_base_url
+        else:
+            openai_key = app_settings.openai_api_key
+            openai_base_url = app_settings.openai_base_url
+
         if openai_key:
-            base_url = api_base_url if self.api_provider == "openai" else app_settings.openai_base_url
-            client = OpenAIClient(openai_key, base_url or "https://api.openai.com/v1", self.config)
+            client = OpenAIClient(openai_key, openai_base_url or "https://api.openai.com/v1", self.config)
             self._openai_provider = OpenAIProvider(client)
         
         # 初始化 Anthropic

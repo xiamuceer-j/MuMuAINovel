@@ -43,13 +43,70 @@ class CoverSettingsTestRequest(BaseModel):
 
 def read_env_defaults() -> Dict[str, Any]:
     """从.env文件读取默认配置（仅读取，不修改）"""
+    default_provider = (app_settings.default_ai_provider or "openai").lower().strip()
+    provider_defaults = _resolve_provider_defaults(default_provider)
     return {
-        "api_provider": app_settings.default_ai_provider,
-        "api_key": app_settings.openai_api_key or app_settings.anthropic_api_key or "",
-        "api_base_url": app_settings.openai_base_url or app_settings.anthropic_base_url or "",
+        "api_provider": default_provider,
+        "api_key": "" if default_provider == "xiaomi_mimo" else provider_defaults["api_key"],
+        "api_base_url": provider_defaults["api_base_url"],
         "llm_model": app_settings.default_model,
         "temperature": app_settings.default_temperature,
         "max_tokens": app_settings.default_max_tokens,
+    }
+
+
+def _normalize_raw_provider(provider: Optional[str]) -> str:
+    """保留内置适配器名称，仅做大小写/空白标准化。"""
+    return (provider or "openai").lower().strip()
+
+
+def _resolve_provider_defaults(provider: Optional[str]) -> Dict[str, str]:
+    """按 provider 解析环境变量默认配置，避免在代码中硬编码真实密钥。"""
+    raw_provider = _normalize_raw_provider(provider)
+    if raw_provider == "xiaomi_mimo":
+        return {
+            "api_key": app_settings.xiaomi_mimo_api_key or "",
+            "api_base_url": app_settings.xiaomi_mimo_base_url or "https://token-plan-cn.xiaomimimo.com/v1",
+        }
+    if raw_provider == "anthropic":
+        return {
+            "api_key": app_settings.anthropic_api_key or "",
+            "api_base_url": app_settings.anthropic_base_url or "",
+        }
+    if raw_provider == "gemini":
+        return {
+            "api_key": app_settings.gemini_api_key or "",
+            "api_base_url": app_settings.gemini_base_url or "",
+        }
+    return {
+        "api_key": app_settings.openai_api_key or "",
+        "api_base_url": app_settings.openai_base_url or "",
+    }
+
+
+def _apply_provider_defaults(provider: Optional[str], api_key: Optional[str], api_base_url: Optional[str]) -> Dict[str, str]:
+    """补齐内置适配器或环境变量中的 key/base_url。"""
+    defaults = _resolve_provider_defaults(provider)
+    return {
+        "api_key": api_key or defaults["api_key"],
+        "api_base_url": api_base_url or defaults["api_base_url"],
+    }
+
+
+def resolve_runtime_ai_config(provider: Optional[str], api_key: Optional[str], api_base_url: Optional[str]) -> Dict[str, str]:
+    """在 API 层解析运行时 AI 配置。
+
+    内置适配器（如 Xiaomi MiMo）只在数据库/前端保留 provider 标识与地址，真实 Key
+    仅从后端环境变量读取；传给 AIService 时转换为底层兼容 provider（OpenAI 格式）。
+    """
+    raw_provider = _normalize_raw_provider(provider)
+    resolved = _apply_provider_defaults(raw_provider, api_key, api_base_url)
+    runtime_provider = "openai" if raw_provider == "xiaomi_mimo" else (normalize_provider(raw_provider) or "openai")
+    return {
+        "raw_provider": raw_provider,
+        "api_provider": runtime_provider,
+        "api_key": resolved["api_key"],
+        "api_base_url": resolved["api_base_url"],
     }
 
 
@@ -86,10 +143,15 @@ def _build_ai_service_from_config(
     enable_mcp: bool,
 ) -> AIService:
     """基于指定配置创建AI服务。"""
+    resolved_config = resolve_runtime_ai_config(
+        config.get('api_provider'),
+        config.get('api_key'),
+        config.get('api_base_url'),
+    )
     return create_user_ai_service_with_mcp(
-        api_provider=normalize_provider(config.get('api_provider')),
-        api_key=config.get('api_key') or "",
-        api_base_url=config.get('api_base_url') or "",
+        api_provider=resolved_config["api_provider"],
+        api_key=resolved_config["api_key"],
+        api_base_url=resolved_config["api_base_url"],
         model_name=config.get('llm_model') or app_settings.default_model,
         temperature=config.get('temperature') if config.get('temperature') is not None else app_settings.default_temperature,
         max_tokens=config.get('max_tokens') if config.get('max_tokens') is not None else app_settings.default_max_tokens,
@@ -194,10 +256,11 @@ async def get_user_ai_service(
     
     # ✅ 使用支持MCP的工厂函数创建AI服务实例
     # 传递 user_id 和 db_session，使得 AIService 能够自动加载用户配置的MCP工具
+    resolved_settings = resolve_runtime_ai_config(settings.api_provider, settings.api_key, settings.api_base_url)
     return create_user_ai_service_with_mcp(
-        api_provider=settings.api_provider,
-        api_key=settings.api_key,
-        api_base_url=settings.api_base_url or "",
+        api_provider=resolved_settings["api_provider"],
+        api_key=resolved_settings["api_key"],
+        api_base_url=resolved_settings["api_base_url"],
         model_name=settings.llm_model,
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
@@ -258,10 +321,11 @@ async def get_user_ai_service_from_db_by_usage(
                 )
             logger.warning(f"用户 {user_id} 配置的章节内容分析预设不存在，回退默认API配置: {preset_id}")
 
+    resolved_settings = resolve_runtime_ai_config(settings.api_provider, settings.api_key, settings.api_base_url)
     return create_user_ai_service_with_mcp(
-        api_provider=settings.api_provider,
-        api_key=settings.api_key,
-        api_base_url=settings.api_base_url or "",
+        api_provider=resolved_settings["api_provider"],
+        api_key=resolved_settings["api_key"],
+        api_base_url=resolved_settings["api_base_url"],
         model_name=settings.llm_model,
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
@@ -563,8 +627,8 @@ async def delete_settings(
 
 @router.get("/models")
 async def get_available_models(
-    api_key: str,
-    api_base_url: str,
+    api_key: Optional[str] = "",
+    api_base_url: Optional[str] = "",
     provider: str = "openai",
     user: User = Depends(require_login)
 ):
@@ -580,8 +644,11 @@ async def get_available_models(
         模型列表
     """
     try:
-        provider = normalize_provider(provider)
-        api_base_url = validate_public_http_url(api_base_url)
+        raw_provider = _normalize_raw_provider(provider)
+        resolved_config = resolve_runtime_ai_config(raw_provider, api_key, api_base_url)
+        provider = resolved_config["api_provider"]
+        api_key = resolved_config["api_key"]
+        api_base_url = validate_public_http_url(resolved_config["api_base_url"])
         async with httpx.AsyncClient(timeout=10.0) as client:
             if provider == "openai" or provider == "azure" or provider == "custom":
                 # OpenAI 兼容接口获取模型列表
@@ -677,8 +744,8 @@ async def get_available_models(
 
 class ApiTestRequest(BaseModel):
     """API 测试请求模型"""
-    api_key: str
-    api_base_url: str
+    api_key: Optional[str] = ""
+    api_base_url: Optional[str] = ""
     provider: str
     llm_model: str
     temperature: Optional[float] = None
@@ -701,9 +768,11 @@ async def check_function_calling_support(data: ApiTestRequest):
     Returns:
         检测结果包含支持状态、详细信息和建议
     """
-    api_key = data.api_key
-    api_base_url = data.api_base_url
-    provider = normalize_provider(data.provider)
+    raw_provider = _normalize_raw_provider(data.provider)
+    resolved_config = resolve_runtime_ai_config(raw_provider, data.api_key, data.api_base_url)
+    api_key = resolved_config["api_key"]
+    api_base_url = resolved_config["api_base_url"]
+    provider = resolved_config["api_provider"]
     llm_model = data.llm_model
     
     try:
@@ -917,9 +986,11 @@ async def test_api_connection(data: ApiTestRequest):
     Returns:
         测试结果包含状态、响应时间和详细信息
     """
-    api_key = data.api_key
-    api_base_url = data.api_base_url
-    provider = normalize_provider(data.provider)
+    raw_provider = _normalize_raw_provider(data.provider)
+    resolved_config = resolve_runtime_ai_config(raw_provider, data.api_key, data.api_base_url)
+    api_key = resolved_config["api_key"]
+    api_base_url = resolved_config["api_base_url"]
+    provider = resolved_config["api_provider"]
     llm_model = data.llm_model
     # 使用前端传递的参数，如果未传递则使用默认值
     temperature = data.temperature if data.temperature is not None else 0.7
@@ -1170,7 +1241,7 @@ async def create_preset(
         "created_at": datetime.now().isoformat(),
         "config": {
             **data.config.model_dump(),
-            "api_provider": normalize_provider(data.config.api_provider)
+            "api_provider": _normalize_raw_provider(data.config.api_provider)
         }
     }
     
@@ -1223,7 +1294,7 @@ async def update_preset(
     if data.config is not None:
         target_preset['config'] = {
             **data.config.model_dump(),
-            'api_provider': normalize_provider(data.config.api_provider)
+            'api_provider': _normalize_raw_provider(data.config.api_provider)
         }
     
     # 保存回preferences
@@ -1312,9 +1383,10 @@ async def activate_preset(
     
     # 应用配置到Settings主字段
     config = target_preset['config']
-    settings.api_provider = normalize_provider(config['api_provider'])
-    settings.api_key = config['api_key']
-    settings.api_base_url = config.get('api_base_url')
+    resolved_config = _apply_provider_defaults(config.get('api_provider'), config.get('api_key'), config.get('api_base_url'))
+    settings.api_provider = _normalize_raw_provider(config['api_provider'])
+    settings.api_key = config.get('api_key') or ""
+    settings.api_base_url = resolved_config["api_base_url"]
     settings.llm_model = config['llm_model']
     settings.temperature = config['temperature']
     settings.max_tokens = config['max_tokens']
@@ -1430,7 +1502,7 @@ async def create_preset_from_current(
     
     # 从当前Settings主字段读取配置
     current_config = APIKeyPresetConfig(
-        api_provider=normalize_provider(settings.api_provider),
+        api_provider=_normalize_raw_provider(settings.api_provider),
         api_key=settings.api_key,
         api_base_url=settings.api_base_url,
         llm_model=settings.llm_model,

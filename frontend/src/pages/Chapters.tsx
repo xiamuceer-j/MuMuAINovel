@@ -487,10 +487,10 @@ export default function Chapters() {
         const settings = await settingsResponse.json();
         const { api_key, api_base_url, api_provider } = settings;
 
-        if (api_key && api_base_url) {
+        if (api_base_url) {
           try {
             const modelsResponse = await fetch(
-              `/api/settings/models?api_key=${encodeURIComponent(api_key)}&api_base_url=${encodeURIComponent(api_base_url)}&provider=${api_provider}`
+              `/api/settings/models?api_key=${encodeURIComponent(api_key || '')}&api_base_url=${encodeURIComponent(api_base_url)}&provider=${api_provider}`
             );
             if (modelsResponse.ok) {
               const data = await modelsResponse.json();

@@ -6,6 +6,7 @@ import { BellOutlined, CheckCircleOutlined, DeleteOutlined, EditOutlined, EyeInv
 import { announcementApi, authApi, settingsApi } from '../services/api';
 import type { Announcement, AnnouncementCreate, AnnouncementLevel, AnnouncementStatus, AnnouncementStatusResponse, AnnouncementUpdate, SystemSMTPSettings, SystemSMTPSettingsUpdate, User } from '../types';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import AutoAdvancementSettings from '../components/AutoAdvancementSettings';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -739,6 +740,16 @@ export default function SystemSettingsPage() {
                 </Space>
               </Card>
             ),
+          },
+          {
+            key: 'automation',
+            label: (
+              <Space>
+                <SettingOutlined />
+                自动推进
+              </Space>
+            ),
+            children: <AutoAdvancementSettings />,
           },
         ]}
       />

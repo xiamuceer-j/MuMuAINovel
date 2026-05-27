@@ -1305,3 +1305,28 @@ export const foreshadowApi = {
       data
     ),
 };
+
+export const projectAutomationApi = {
+  getSchedule: async (projectId: string, signal?: AbortSignal): Promise<import('../types').ProjectGenerationSchedule | null> => {
+    const response = await axios.get<import('../types').ProjectGenerationSchedule>(`/api/project-automation/${projectId}`, {
+      withCredentials: true,
+      validateStatus: (status) => status === 200 || status === 404,
+      signal,
+    });
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    return response.data;
+  },
+
+  saveSchedule: (projectId: string, data: import('../types').ProjectGenerationScheduleUpdate) =>
+    api.put<unknown, import('../types').ProjectGenerationSchedule>(`/project-automation/${projectId}`, data),
+
+  deleteSchedule: (projectId: string) =>
+    api.delete<unknown, { message: string; project_id: string }>(`/project-automation/${projectId}`),
+
+  triggerSchedule: (projectId: string) =>
+    api.post<unknown, import('../types').ProjectGenerationSchedule>(`/project-automation/${projectId}/trigger`),
+};

@@ -2604,19 +2604,13 @@ class PromptService:
     @staticmethod
     def format_prompt(template: str, **kwargs) -> str:
         """
-        格式化提示词模板
-        
-        Args:
-            template: 提示词模板
-            **kwargs: 模板参数
-            
-        Returns:
-            格式化后的提示词
+        格式化提示词模板。
+
+        缺失的参数自动以空字符串替代，避免用户自定义模板因新增占位符而崩溃。
         """
-        try:
-            return template.format(**kwargs)
-        except KeyError as e:
-            raise ValueError(f"缺少必需的参数: {e}")
+        from collections import defaultdict
+        safe_kwargs = defaultdict(str, kwargs)
+        return template.format_map(safe_kwargs)
     
 
     @classmethod

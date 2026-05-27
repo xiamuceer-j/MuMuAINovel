@@ -13,6 +13,10 @@ from app.logger import setup_logging, get_logger
 from app.middleware import RequestIDMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
 from app.mcp import mcp_client, register_status_sync
+from app.services.project_generation_scheduler import (
+    start_project_generation_scheduler,
+    stop_project_generation_scheduler,
+)
 
 setup_logging(
     level=config_settings.log_level,
@@ -44,9 +48,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"后台任务表检查失败（不影响启动）: {e}")
 
+    start_project_generation_scheduler()
+
     logger.info("应用启动完成")
-    
+
     yield
+
+    await stop_project_generation_scheduler()
     
     # 清理MCP插件
     await mcp_client.cleanup()
@@ -147,7 +155,8 @@ from app.api import (
     auth, users, settings, writing_styles, memories,
     mcp_plugins, admin, inspiration, prompt_templates,
     changelog, careers, foreshadows, prompt_workshop, book_import,
-    project_covers, tasks, skills, announcements
+    project_covers, tasks, skills, announcements,
+    project_generation_schedule
 )
 
 app.include_router(auth.router, prefix="/api")
@@ -157,6 +166,7 @@ app.include_router(admin.router, prefix="/api")
 
 app.include_router(projects.router, prefix="/api")
 app.include_router(project_covers.router, prefix="/api")
+app.include_router(project_generation_schedule.router, prefix="/api")
 app.include_router(wizard_stream.router, prefix="/api")
 app.include_router(inspiration.router, prefix="/api")
 app.include_router(outlines.router, prefix="/api")

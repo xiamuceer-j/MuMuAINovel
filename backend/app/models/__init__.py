@@ -7,6 +7,7 @@ from app.models.relationship import CharacterRelationship, Organization, Organiz
 from app.models.generation_history import GenerationHistory
 from app.models.analysis_task import AnalysisTask
 from app.models.batch_generation_task import BatchGenerationTask
+from app.models.project_generation_schedule import ProjectGenerationSchedule
 from app.models.settings import Settings
 from app.models.memory import StoryMemory, PlotAnalysis
 from app.models.writing_style import WritingStyle
@@ -33,6 +34,7 @@ __all__ = [
     "GenerationHistory",
     "AnalysisTask",
     "BatchGenerationTask",
+    "ProjectGenerationSchedule",
     "Settings",
     "StoryMemory",
     "PlotAnalysis",

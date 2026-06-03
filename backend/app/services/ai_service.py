@@ -497,6 +497,7 @@ class AIService:
         tool_choice: Optional[str] = None,
         auto_mcp: bool = True,
         mcp_max_rounds: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式生成文本（自动支持MCP工具）
@@ -553,6 +554,7 @@ class AIService:
                 tools=tools_to_use,
                 tool_choice=tool_choice,
                 user_id=self.user_id,
+                reasoning_effort=reasoning_effort,
             ):
                 if isinstance(chunk, dict):
                     if chunk.get("usage"):

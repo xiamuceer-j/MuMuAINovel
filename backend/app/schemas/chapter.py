@@ -122,6 +122,7 @@ class ChapterGenerateRequest(BaseModel):
     model: Optional[str] = Field(None, description="指定使用的AI模型，不提供则使用用户默认模型")
     narrative_perspective: Optional[str] = Field(None, description="临时人称视角：first_person/third_person/omniscient，不提供则使用项目默认")
     skill_key: Optional[str] = Field(None, description="Skill 标识，指定后以该 Skill 的工作流指导创作")
+    reasoning_effort: Optional[str] = Field(None, description="思考模式：low/medium/high，不提供则不启用思考")
 
 
 class BatchGenerateRequest(BaseModel):
@@ -141,6 +142,7 @@ class BatchGenerateRequest(BaseModel):
     model: Optional[str] = Field(None, description="指定使用的AI模型，不提供则使用用户默认模型")
     narrative_perspective: Optional[str] = Field(None, description="临时指定叙事人称，不提供则使用项目默认")
     skill_key: Optional[str] = Field(None, description="Skill 标识，指定后以该 Skill 的工作流指导创作")
+    reasoning_effort: Optional[str] = Field(None, description="思考模式：low/medium/high，不提供则不启用思考")
 
 
 class BatchGenerateResponse(BaseModel):

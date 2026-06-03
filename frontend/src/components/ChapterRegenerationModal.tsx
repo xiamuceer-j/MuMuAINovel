@@ -13,7 +13,8 @@ import {
   message,
   Collapse,
   Card,
-  Radio
+  Radio,
+  Select
 } from 'antd';
 import {
   ReloadOutlined,
@@ -63,6 +64,35 @@ const ChapterRegenerationModal: React.FC<ChapterRegenerationModalProps> = ({
   const [wordCount, setWordCount] = useState(0);
   const [selectedSuggestions, setSelectedSuggestions] = useState<number[]>([]);
   const [modificationSource, setModificationSource] = useState<'custom' | 'analysis_suggestions' | 'mixed'>('custom');
+  const [availableModels, setAvailableModels] = useState<Array<{ value: string; label: string }>>([]);
+
+  // 加载可用模型
+  const loadAvailableModels = async () => {
+    try {
+      const settingsResponse = await fetch('/api/settings');
+      if (settingsResponse.ok) {
+        const settings = await settingsResponse.json();
+        const { api_key, api_base_url, api_provider } = settings;
+        if (api_key && api_base_url) {
+          try {
+            const modelsResponse = await fetch(
+              `/api/settings/models?api_key=${encodeURIComponent(api_key)}&api_base_url=${encodeURIComponent(api_base_url)}&provider=${api_provider}`
+            );
+            if (modelsResponse.ok) {
+              const data = await modelsResponse.json();
+              if (data.models && data.models.length > 0) {
+                setAvailableModels(data.models);
+              }
+            }
+          } catch {
+            console.log('获取模型列表失败');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('加载可用模型失败:', error);
+    }
+  };
 
   useEffect(() => {
     if (visible) {
@@ -86,8 +116,12 @@ const ChapterRegenerationModal: React.FC<ChapterRegenerationModalProps> = ({
         target_word_count: 3000,
         preserve_structure: false,
         preserve_character_traits: true,
-        focus_areas: []
+        focus_areas: [],
+        model: undefined
       });
+
+      // 加载模型列表
+      loadAvailableModels();
     }
   }, [visible, hasAnalysis, suggestions.length, form]);
 
@@ -119,22 +153,7 @@ const ChapterRegenerationModal: React.FC<ChapterRegenerationModalProps> = ({
       setWordCount(0);
 
       // 构建请求数据
-      interface RegenerationRequest {
-        modification_source: string;
-        custom_instructions?: string;
-        selected_suggestion_indices: number[];
-        preserve_elements: {
-          preserve_structure: boolean;
-          preserve_dialogues: string[];
-          preserve_plot_points: string[];
-          preserve_character_traits: boolean;
-        };
-        style_id?: string;
-        target_word_count: number;
-        focus_areas: string[];
-      }
-
-      const requestData: RegenerationRequest = {
+      const requestData: Record<string, unknown> = {
         modification_source: values.modification_source,
         custom_instructions: values.custom_instructions,
         selected_suggestion_indices: selectedSuggestions,
@@ -146,7 +165,8 @@ const ChapterRegenerationModal: React.FC<ChapterRegenerationModalProps> = ({
         },
         style_id: values.style_id,
         target_word_count: values.target_word_count,
-        focus_areas: values.focus_areas || []
+        focus_areas: values.focus_areas || [],
+        model: values.model || undefined
       };
 
       let accumulatedContent = '';
@@ -383,6 +403,30 @@ const ChapterRegenerationModal: React.FC<ChapterRegenerationModalProps> = ({
                 </Form.Item>
               </Space>
             </Form.Item>
+
+            <Divider />
+
+            {/* AI模型 */}
+            {availableModels.length > 0 && (
+              <Form.Item
+                name="model"
+                label="AI模型"
+                tooltip="选择用于重新生成的AI模型，不选则使用默认模型"
+              >
+                <Select
+                  placeholder="使用默认模型"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                >
+                  {availableModels.map(model => (
+                    <Select.Option key={model.value} value={model.value} label={model.label}>
+                      {model.label}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )}
 
             <Divider />
 

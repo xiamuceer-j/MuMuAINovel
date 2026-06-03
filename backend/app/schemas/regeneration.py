@@ -31,6 +31,7 @@ class ChapterRegenerateRequest(BaseModel):
     style_id: Optional[int] = Field(None, description="写作风格ID")
     target_word_count: int = Field(3000, description="目标字数", ge=500, le=10000)
     focus_areas: List[str] = Field(default_factory=list, description="重点优化方向")
+    model: Optional[str] = Field(None, description="自定义AI模型")
     
     # 版本管理
     save_as_version: bool = Field(True, description="是否保存为新版本")

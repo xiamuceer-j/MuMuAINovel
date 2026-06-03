@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Table, Modal, Form, Input, Tag, Space, message, Popconfirm, Card, theme, Empty, Badge, Tooltip, Select } from 'antd';
+import { Button, Table, Modal, Form, Input, Tag, Space, message, Popconfirm, Card, theme, Empty, Badge, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, ThunderboltOutlined, FileTextOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
@@ -10,6 +10,8 @@ interface SkillItem {
   template_name: string;
   display_name: string;
   category: string;
+  skill_type: string;
+  category_hint: string;
   description: string;
   triggers: string[];
 }
@@ -20,6 +22,8 @@ interface SkillDetail {
   template_name: string;
   display_name: string;
   category: string;
+  skill_type: string;
+  category_hint: string;
   description: string;
   triggers: string[];
   body: string;
@@ -27,27 +31,13 @@ interface SkillDetail {
   standalone_references: Record<string, string>;
 }
 
-const SKILL_CATEGORY_OPTIONS = [
-  { label: 'Skill·长篇', value: 'Skill·长篇' },
-  { label: 'Skill·短篇', value: 'Skill·短篇' },
-  { label: 'Skill·润色', value: 'Skill·润色' },
-  { label: 'Skill·工具', value: 'Skill·工具' },
-  { label: 'Skill', value: 'Skill' },
+const SKILL_TYPE_OPTIONS = [
+  { value: 'writing', label: '✍️ 写作类', hint: '创作章节时注入 → 改变 AI 写作风格（对话、悬念等）' },
+  { value: 'polishing', label: '✨ 润色类', hint: '生成两次：先写初稿 → 再自动润色去AI味' },
+  { value: 'analysis', label: '🔍 分析类', hint: 'Skill Chat 对话中使用，分析章节内容' },
+  { value: 'tool', label: '🔧 工具类', hint: 'Skill Chat 对话中使用，浏览器、搜索等辅助能力' },
+  { value: 'generic', label: '💬 通用类', hint: 'Skill Chat 对话中使用，通用助手' },
 ];
-
-const parseTriggers = (value: string): string[] => (
-  (value || '')
-    .split(/[\n,，、]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .filter((item, index, array) => array.indexOf(item) === index)
-);
-
-const formatTriggers = (triggers: string[]) => (triggers || []).join('\n');
-
-const normalizeCategory = (value: string | string[]) => (
-  Array.isArray(value) ? (value[0] || '').trim() : (value || '').trim()
-);
 
 export default function SkillManage() {
   const { token } = theme.useToken();
@@ -90,9 +80,7 @@ export default function SkillManage() {
         const detail: SkillDetail = await response.json();
         setEditingSkill(detail);
         editForm.setFieldsValue({
-          name: detail.name,
-          display_name: detail.display_name || detail.template_name,
-          category: detail.category,
+          skill_type: detail.skill_type || 'generic',
           description: detail.description,
           triggers: formatTriggers(detail.triggers),
           body: detail.body,
@@ -162,6 +150,7 @@ export default function SkillManage() {
           triggers,
           body: values.body,
           references: refs,
+          skill_type: values.skill_type,
         }),
       });
 
@@ -220,6 +209,7 @@ export default function SkillManage() {
           triggers,
           body: values.body,
           references: refs,
+          skill_type: values.skill_type,
         }),
       });
 
@@ -279,16 +269,30 @@ export default function SkillManage() {
       title: '分类',
       dataIndex: 'category',
       key: 'category',
-      width: 120,
-      render: (cat: string) => {
+      width: 200,
+      render: (cat: string, record: SkillItem) => {
         const colorMap: Record<string, string> = {
-          'Skill·长篇': 'blue',
-          'Skill·短篇': 'green',
+          '✍️ 写作类': 'blue',
+          '✨ 润色类': 'orange',
+          '🔍 分析类': 'green',
+          '🔧 工具类': 'purple',
+          '💬 通用类': 'default',
+          'Skill·写作': 'blue',
           'Skill·润色': 'orange',
+          'Skill·分析': 'green',
           'Skill·工具': 'purple',
           'Skill': 'default',
         };
-        return <Tag color={colorMap[cat] || 'default'}>{cat}</Tag>;
+        return (
+          <div>
+            <Tag color={colorMap[cat] || 'default'}>{cat}</Tag>
+            {record.category_hint && (
+              <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 2 }}>
+                {record.category_hint}
+              </div>
+            )}
+          </div>
+        );
       },
     },
     {
@@ -471,31 +475,22 @@ export default function SkillManage() {
         destroyOnClose
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item label="内部标识" name="name" tooltip="来自 SKILL.md 的 name 字段，编辑时不支持修改">
-            <Input disabled />
+          <Form.Item label="分类" name="skill_type" rules={[{ required: true, message: '请选择分类' }]}
+            tooltip="决定 Skill 的生效时机和执行方式">
+            <Select placeholder="选择 Skill 分类">
+              {SKILL_TYPE_OPTIONS.map(opt => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  <div>
+                    <div>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: '#999' }}>{opt.hint}</div>
+                  </div>
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
-          <Form.Item label="显示名称" name="display_name" rules={[{ required: true, whitespace: true, message: '请输入显示名称' }]}
-            tooltip="表格和工具箱中展示的名称">
-            <Input placeholder="例如：长篇网文拆文" maxLength={60} />
-          </Form.Item>
-          <Form.Item label="分类" name="category" rules={[{ required: true, message: '请选择分类' }]}
-            tooltip="表格和工具箱中展示的 Skill 分类">
-            <Select
-              showSearch
-              options={SKILL_CATEGORY_OPTIONS}
-              placeholder="请选择或输入分类"
-              mode="tags"
-              maxCount={1}
-              tokenSeparators={[',', '，', '、']}
-            />
-          </Form.Item>
-          <Form.Item label="描述" name="description" rules={[{ required: true, whitespace: true, message: '请输入描述' }]}
-            tooltip="用于解释 Skill 的用途，不再承担名称和触发词配置">
-            <TextArea rows={4} placeholder="简要描述 Skill 功能、适用场景和使用方式..." />
-          </Form.Item>
-          <Form.Item label="触发词" name="triggers" rules={[{ required: true, whitespace: true, message: '请至少填写一个触发词' }]}
-            tooltip="每行一个，也支持用逗号、顿号分隔。建议包含 /skill-name">
-            <TextArea rows={4} placeholder={'/story-long-analyze\n/长篇拆文\n帮我拆这本书'} />
+          <Form.Item label="描述" name="description" rules={[{ required: true, message: '请输入描述' }]}
+            tooltip="第一句话会作为 UI 显示名称">
+            <TextArea rows={3} placeholder="一句话描述 Skill 功能。后续详细说明..." />
           </Form.Item>
           <Form.Item label="工作流指令" name="body" rules={[{ required: true, message: '请输入工作流指令' }]}
             tooltip="SKILL.md 中 YAML frontmatter 之后的 Markdown 正文">
@@ -528,28 +523,22 @@ export default function SkillManage() {
             tooltip="英文小写+短横线，如 my-new-skill。将作为目录名和内部标识">
             <Input placeholder="my-new-skill" />
           </Form.Item>
-          <Form.Item label="显示名称" name="display_name" rules={[{ required: true, whitespace: true, message: '请输入显示名称' }]}
-            tooltip="表格和工具箱中展示的名称">
-            <Input placeholder="例如：我的新 Skill" maxLength={60} />
+          <Form.Item label="分类" name="skill_type" rules={[{ required: true, message: '请选择分类' }]}
+            tooltip="决定 Skill 的生效时机和执行方式">
+            <Select placeholder="选择 Skill 分类">
+              {SKILL_TYPE_OPTIONS.map(opt => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  <div>
+                    <div>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: '#999' }}>{opt.hint}</div>
+                  </div>
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
-          <Form.Item label="分类" name="category" rules={[{ required: true, message: '请选择分类' }]}
-            tooltip="表格和工具箱中展示的 Skill 分类">
-            <Select
-              showSearch
-              options={SKILL_CATEGORY_OPTIONS}
-              placeholder="请选择或输入分类"
-              mode="tags"
-              maxCount={1}
-              tokenSeparators={[',', '，', '、']}
-            />
-          </Form.Item>
-          <Form.Item label="描述" name="description" rules={[{ required: true, whitespace: true, message: '请输入描述' }]}
-            tooltip="用于解释 Skill 的用途，不再承担名称和触发词配置">
-            <TextArea rows={4} placeholder="简要描述 Skill 功能、适用场景和使用方式..." />
-          </Form.Item>
-          <Form.Item label="触发词" name="triggers" rules={[{ required: true, whitespace: true, message: '请至少填写一个触发词' }]}
-            tooltip="每行一个，也支持用逗号、顿号分隔。建议包含 /skill-name">
-            <TextArea rows={4} placeholder={'/my-new-skill\n我的新 Skill'} />
+          <Form.Item label="描述" name="description" rules={[{ required: true, message: '请输入描述' }]}
+            tooltip="第一句话会作为 UI 显示名称">
+            <TextArea rows={3} placeholder="一句话描述 Skill 功能。后续详细说明..." />
           </Form.Item>
           <Form.Item label="工作流指令" name="body" rules={[{ required: true, message: '请输入工作流指令' }]}
             tooltip="Skill 的核心 Markdown 内容">

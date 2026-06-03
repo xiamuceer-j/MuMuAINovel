@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
+import re
 
 from app.models.character import Character
 from app.models.relationship import Organization, OrganizationMember
@@ -12,6 +13,12 @@ from app.services.prompt_service import PromptService
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _normalize_org_name(name: str) -> str:
+    """归一化组织名称：去除括号后缀（如「暗影商会（地下）」→「暗影商会」）"""
+    normalized = re.sub(r'[（(][^）)]*[）)]', '', name).strip()
+    return normalized if normalized else name
 
 
 class AutoOrganizationService:
@@ -174,9 +181,9 @@ class AutoOrganizationService:
                 if not character_name:
                     continue
                 
-                # 查找目标角色
+                # 查找目标角色（使用归一化名称匹配）
                 target_char = next(
-                    (c for c in existing_characters if c.name == character_name and not c.is_organization),
+                    (c for c in existing_characters if _normalize_org_name(c.name) == _normalize_org_name(character_name) and not c.is_organization),
                     None
                 )
                 
@@ -275,7 +282,9 @@ class AutoOrganizationService:
                             # 只处理 organization 类型
                             if entry_type != "organization" or not entry_name.strip():
                                 continue
-                            name = entry_name.strip()
+                            raw_name = entry_name.strip()
+                            # 归一化名称，去除括号后缀
+                            name = _normalize_org_name(raw_name)
                             all_organization_names.add(name)
                             if name not in organization_context:
                                 organization_context[name] = []
@@ -300,9 +309,9 @@ class AutoOrganizationService:
             )
         )
         existing_org_characters = existing_result.scalars().all()
-        existing_org_names = {char.name for char in existing_org_characters}
+        existing_org_names = {_normalize_org_name(char.name) for char in existing_org_characters}
         
-        # 3. 找出缺失的组织
+        # 3. 找出缺失的组织（基于归一化名称匹配）
         missing_names = all_organization_names - existing_org_names
         
         if not missing_names:

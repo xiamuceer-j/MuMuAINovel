@@ -403,8 +403,10 @@ class PromptService:
 ]
 
 【characters字段说明】
-- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派等
+- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派/公司/机构等
 - 必须区分角色和组织，不要把组织当作角色
+- ⚠️ 重要：故事中出现的帮派、门派、公司、政府机构、学校、家族等组织/势力实体都必须列入characters，并标记type为"organization"
+- 每章characters中应包含该章涉及的组织/势力（如果剧情涉及的话）
 
 【格式规范】
 - 纯JSON数组输出，无markdown标记
@@ -524,8 +526,10 @@ class PromptService:
 ]
 
 【characters字段说明】
-- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派等
+- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派/公司/机构等
 - 必须区分角色和组织，不要把组织当作角色
+- ⚠️ 重要：故事中出现的帮派、门派、公司、政府机构、学校、家族等组织/势力实体都必须列入characters，并标记type为"organization"
+- 每章characters中应包含该章涉及的组织/势力（如果剧情涉及的话）
 
 【格式规范】
 - 纯JSON数组输出，无markdown标记
@@ -2601,6 +2605,37 @@ class PromptService:
 ❌ 使用 markdown 或代码块
 </constraints>"""
 
+    # AI去味提示词（润色/去AI味）- 分段省token模式
+    AI_DENOISING = """你负责把文本改得更像人写的。只做局部修改，不要整段重写。
+
+【操作顺序（必须按顺序执行）】
+1. 删：删除解释句、总结句、废话
+2. 换：替换AI高频表达（"眼中闪过""嘴角勾起""一丝""一抹""不禁"等）
+3. 拆：长句拆短句，打乱整齐的节奏
+4. 外化：把内心情绪改成动作/停顿/环境暗示
+
+【硬性限制】
+- 不新增信息，不改变剧情
+- 尽量局部修改，避免整段重写（仅在AI味极重时允许重写一句）
+- 优先删除，而不是改写
+- 保持原文大致字数
+
+【必须处理】
+- 删除："他感到 / 他意识到 / 他明白了"
+- 删除：结尾总结、升华句、"不禁让人..."
+- 替换："眼中闪过 / 嘴角勾起 / 一丝 / 一抹"
+- 打碎：连续排比或整齐句式
+
+【写法要求】
+- 句长不稳定（长短交错）
+- 允许断句、不完整句
+- 对话更接近日常说话
+
+【原文】
+{original_text}
+
+只输出修改后的文本，不要任何解释。"""
+
     @staticmethod
     def format_prompt(template: str, **kwargs) -> str:
         """
@@ -3107,6 +3142,12 @@ class PromptService:
                 "category": "灵感模式",
                 "description": "根据用户提供的部分信息智能补全完整的小说方案",
                 "parameters": ["existing"]
+            },
+            "AI_DENOISING": {
+                "name": "AI去味/润色",
+                "category": "润色",
+                "description": "将AI生成的文本改写得更像人类作家手笔，局部修改、优先删除、不整段重写",
+                "parameters": ["original_text"]
             }
         }
         

@@ -53,7 +53,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: mumujie/mumuainovel:latest
+    image: mumujie/mumuainovel:dev
     container_name: mumuainovel
     depends_on:
       postgres:
@@ -63,6 +63,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./storage/generated_covers:/app/storage/generated_covers
+      - ./skills_data:/app/storage/skills
       - ./.env:/app/.env:ro
     environment:
       # 时区配置
@@ -137,6 +138,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  skills_data:
     driver: local
 
 networks:

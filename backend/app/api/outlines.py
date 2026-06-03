@@ -72,20 +72,32 @@ async def create_outline(
     db.add(db_outline)
     await db.flush()  # 确保大纲有ID
     
-    # 如果是one-to-one模式，自动创建对应的章节
+    # 如果是one-to-one模式，自动创建对应的章节（检查是否已存在）
     if project.outline_mode == 'one-to-one':
-        chapter = Chapter(
-            project_id=outline.project_id,
-            title=db_outline.title,
-            summary=db_outline.content,
-            chapter_number=db_outline.order_index,
-            sub_index=1,
-            outline_id=None,  # one-to-one模式不关联outline_id
-            status='pending',
-            content=""
+        # 检查是否已存在相同chapter_number的章节，避免重复创建
+        existing_chapter_result = await db.execute(
+            select(Chapter).where(
+                Chapter.project_id == outline.project_id,
+                Chapter.chapter_number == db_outline.order_index
+            )
         )
-        db.add(chapter)
-        logger.info(f"一对一模式：为手动创建的大纲 {db_outline.title} (序号{db_outline.order_index}) 自动创建了对应章节")
+        existing_chapter = existing_chapter_result.scalar_one_or_none()
+        
+        if existing_chapter:
+            logger.info(f"一对一模式：跳过手动创建的大纲 {db_outline.title} (序号{db_outline.order_index})，章节已存在")
+        else:
+            chapter = Chapter(
+                project_id=outline.project_id,
+                title=db_outline.title,
+                summary=db_outline.content,
+                chapter_number=db_outline.order_index,
+                sub_index=1,
+                outline_id=None,  # one-to-one模式不关联outline_id
+                status='pending',
+                content=""
+            )
+            db.add(chapter)
+            logger.info(f"一对一模式：为手动创建的大纲 {db_outline.title} (序号{db_outline.order_index}) 自动创建了对应章节")
     
     await db.commit()
     await db.refresh(db_outline)
@@ -947,12 +959,28 @@ async def _save_outlines(
         db.add(outline)
         outlines.append(outline)
     
-    # 如果是one-to-one模式，自动创建章节
+    # 如果是one-to-one模式，自动创建章节（跳过已存在的章节）
     if project and project.outline_mode == 'one-to-one':
         await db.flush()  # 确保大纲有ID
         
+        # 先查询已存在的章节，避免重复创建
+        existing_chapters_result = await db.execute(
+            select(Chapter).where(Chapter.project_id == project_id)
+        )
+        existing_chapters = existing_chapters_result.scalars().all()
+        existing_chapter_numbers = {ch.chapter_number for ch in existing_chapters}
+        
+        created_count = 0
+        skipped_count = 0
+        
         for outline in outlines:
             await db.refresh(outline)
+            
+            # 检查是否已存在相同chapter_number的章节
+            if outline.order_index in existing_chapter_numbers:
+                skipped_count += 1
+                logger.info(f"一对一模式：跳过大纲 {outline.title}（序号{outline.order_index}），章节已存在")
+                continue
             
             # 🔧 从structure中提取title和summary用于创建章节
             try:
@@ -976,8 +1004,10 @@ async def _save_outlines(
                 content=""
             )
             db.add(chapter)
+            existing_chapter_numbers.add(outline.order_index)  # 防止同一批次重复
+            created_count += 1
         
-        logger.info(f"一对一模式：为{len(outlines)}个大纲自动创建了对应的章节")
+        logger.info(f"一对一模式：为大纲创建章节完成（新建{created_count}个，跳过{skipped_count}个已存在的章节）")
     
     return outlines
 
@@ -2209,6 +2239,17 @@ async def _run_continue_outline_bg(
         # 角色校验
         try:
             await _check_and_create_missing_characters_from_outlines(
+                outline_data=outline_data, project_id=project_id, db=db,
+                user_ai_service=user_ai_service, user_id=user_id,
+                enable_mcp=data.get("enable_mcp", True), tracker=tracker
+            )
+            await db.commit()
+        except Exception:
+            pass
+
+        # 组织校验
+        try:
+            await _check_and_create_missing_organizations_from_outlines(
                 outline_data=outline_data, project_id=project_id, db=db,
                 user_ai_service=user_ai_service, user_id=user_id,
                 enable_mcp=data.get("enable_mcp", True), tracker=tracker

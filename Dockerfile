@@ -104,7 +104,10 @@ COPY backend/scripts/migrate.py ./scripts/migrate.py
 RUN chmod +x /app/entrypoint.sh
 
 # 创建必要的目录
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p /app/data /app/logs /app/storage/skills
+
+# 备份内置 Skills（用于 entrypoint 同步到 volume）
+RUN cp -r /app/app/skills /app/app/skills-default
 
 # 暴露端口
 EXPOSE 8000

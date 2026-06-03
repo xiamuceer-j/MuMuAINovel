@@ -7,6 +7,8 @@ from datetime import datetime
 from app.logger import get_logger
 import os
 import hashlib
+import asyncio
+import concurrent.futures
 
 logger = get_logger(__name__)
 
@@ -329,6 +331,14 @@ class MemoryService:
             logger.error(f"❌ 添加记忆失败: {str(e)}")
             return False
     
+    def _encode_batch_sync(self, texts: List[str]) -> List[List[float]]:
+        """同步批量编码文本（在线程池中运行，避免阻塞事件循环）"""
+        return self.embedding_model.encode(texts).tolist()
+
+    def _encode_single_sync(self, text: str) -> List[float]:
+        """同步编码单个文本（在线程池中运行，避免阻塞事件循环）"""
+        return self.embedding_model.encode(text).tolist()
+
     async def batch_add_memories(
         self,
         user_id: str,
@@ -355,16 +365,11 @@ class MemoryService:
             ids = []
             documents = []
             metadatas = []
-            embeddings = []
             
             # 批量准备数据
             for mem in memories:
                 ids.append(mem['id'])
                 documents.append(mem['content'])
-                
-                # 生成embedding
-                embedding = self.embedding_model.encode(mem['content']).tolist()
-                embeddings.append(embedding)
                 
                 # 准备元数据
                 metadata = mem.get('metadata', {})
@@ -380,6 +385,14 @@ class MemoryService:
                 }
                 metadatas.append(chroma_metadata)
             
+            # 🔧 关键修复: 在线程池中批量生成embedding，避免阻塞事件循环
+            # 设置60秒超时，防止无限卡住
+            loop = asyncio.get_event_loop()
+            embeddings = await asyncio.wait_for(
+                loop.run_in_executor(None, self._encode_batch_sync, documents),
+                timeout=60.0
+            )
+            
             # 批量添加
             collection.add(
                 ids=ids,
@@ -391,6 +404,9 @@ class MemoryService:
             logger.info(f"✅ 批量添加记忆成功: {len(memories)}条")
             return len(memories)
             
+        except asyncio.TimeoutError:
+            logger.error(f"❌ 批量添加记忆超时(60秒): {len(memories)}条记忆未添加到向量库")
+            return 0
         except Exception as e:
             logger.error(f"❌ 批量添加记忆失败: {str(e)}")
             return 0

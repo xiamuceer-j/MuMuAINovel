@@ -27,6 +27,14 @@ class SkillChatRequest(BaseModel):
     history: Optional[List[dict]] = None  # 历史对话 [{"role": "user/assistant", "content": "..."}]
 
 
+class SkillApplyChapterRequest(BaseModel):
+    """对已有章节应用 Skill"""
+    chapter_id: str
+    skill_key: str
+    model: Optional[str] = None  # 可选自定义模型
+    thinking_mode: Optional[str] = None  # 思考模式：low / medium / high / None
+
+
 class SkillCreateRequest(BaseModel):
     """创建 Skill 请求"""
     name: str           # Skill 名称（英文，如 my-new-skill）
@@ -36,6 +44,7 @@ class SkillCreateRequest(BaseModel):
     triggers: List[str] # 触发词列表
     body: str           # 工作流指令（Markdown 正文）
     references: Optional[Dict[str, str]] = None  # 参考知识库 {"文件名": "内容"}
+    skill_type: Optional[str] = None  # Skill 类型：writing/polishing/analysis/tool/generic
 
 
 class SkillUpdateRequest(BaseModel):
@@ -46,6 +55,7 @@ class SkillUpdateRequest(BaseModel):
     triggers: Optional[List[str]] = None
     body: Optional[str] = None
     references: Optional[Dict[str, str]] = None
+    skill_type: Optional[str] = None  # Skill 类型：writing/polishing/analysis/tool/generic
 
 
 @router.get("/list")
@@ -59,6 +69,8 @@ async def list_skills(user: User = Depends(require_login)):
             "template_name": s["template_name"],
             "display_name": s.get("display_name", s["template_name"]),
             "category": s["category"],
+            "skill_type": s.get("skill_type", "generic"),
+            "category_hint": s.get("category_hint", ""),
             "description": s["description"],
             "triggers": s.get("triggers", []),
         }
@@ -167,6 +179,137 @@ async def skill_chat(
     return create_sse_response(generate())
 
 
+@router.post("/apply-to-chapter")
+async def apply_skill_to_chapter(
+    request_body: SkillApplyChapterRequest,
+    http_request: Request,
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    对已有章节应用 Skill（流式返回）
+
+    工作流程：
+    1. 加载章节内容
+    2. 以 Skill 内容作为系统提示词
+    3. 将章节内容发给 AI 处理
+    4. 流式返回处理结果
+    5. 自动保存回章节
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models.chapter import Chapter
+    from app.models.project import Project
+    from app.api.common import verify_project_access
+    from app.api.settings import get_user_ai_service
+
+    user_id = getattr(http_request.state, 'user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    # 查找 Skill
+    skills = get_all_skills_cached()
+    skill = None
+    for s in skills:
+        if s["template_key"] == request_body.skill_key:
+            skill = s
+            break
+
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"未找到 Skill: {request_body.skill_key}")
+
+    # 获取章节
+    result = await db.execute(
+        select(Chapter).where(Chapter.id == request_body.chapter_id)
+    )
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    # 验证权限
+    await verify_project_access(chapter.project_id, user_id, db)
+
+    if not chapter.content or chapter.content.strip() == "":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="章节内容为空")
+
+    skill_content = skill["content"]
+    skill_name = skill["template_name"]
+    chapter_content = chapter.content
+
+    logger.info(f"🔧 对章节 {request_body.chapter_id} 应用 Skill '{skill_name}'（{len(chapter_content)}字）")
+
+    # 获取 AI 服务
+    try:
+        ai_service = await get_user_ai_service(user=user, db=db)
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"AI 服务配置错误: {str(e)}")
+
+    # 构建提示词
+    system_prompt = skill_content
+    user_prompt = (
+        "【强制要求】你必须逐句重写以下章节内容，而不是微调。\n"
+        "每一段都必须用你自己的话重新写出来，保留剧情和信息但表达方式必须不同。\n"
+        "直接输出重写后的完整正文，不要任何解释、分析或标记。\n\n"
+        f"{chapter_content}"
+    )
+
+    # 计算 max_tokens（中文字符约1.5-2 token/字，需用5倍字符数确保不截断）
+    max_tokens = max(4000, min(int(len(chapter_content) * 5), 64000))
+
+    generate_kwargs = {
+        "prompt": user_prompt,
+        "system_prompt": system_prompt,
+        "max_tokens": max_tokens,
+    }
+    if request_body.model:
+        generate_kwargs["model"] = request_body.model
+    if request_body.thinking_mode:
+        generate_kwargs["reasoning_effort"] = request_body.thinking_mode
+        # 思考模式下推理 token 会占用 max_tokens，需要翻倍确保输出不被截断
+        generate_kwargs["max_tokens"] = min(max_tokens * 2, 128000)
+        logger.info(f"🧠 思考模式: {request_body.thinking_mode}，max_tokens 从 {max_tokens} 提升到 {generate_kwargs['max_tokens']}")
+
+    async def generate():
+        import asyncio
+        full_content = ""
+        chunk_count = 0
+
+        try:
+            yield await SSEResponse.send_progress(f"正在使用 {skill_name} 处理章节...", 10)
+
+            async for chunk in ai_service.generate_text_stream(**generate_kwargs):
+                full_content += chunk
+                chunk_count += 1
+                yield await SSEResponse.send_chunk(chunk)
+
+                # 每20个chunk发送心跳
+                if chunk_count % 20 == 0:
+                    yield await SSEResponse.send_heartbeat()
+
+                await asyncio.sleep(0)
+
+            # 发送完成事件（不自动保存，等前端用户确认）
+            if full_content.strip():
+                yield await SSEResponse.send_event("completed", {
+                    "content": full_content.strip(),
+                    "word_count_before": len(chapter_content),
+                    "word_count_after": len(full_content.strip()),
+                    "message": f"处理完成，请确认是否保存"
+                })
+
+            yield await SSEResponse.send_progress("处理完成", 100, "success")
+            yield await SSEResponse.send_done()
+
+        except Exception as e:
+            logger.error(f"Skill 处理章节失败: {e}")
+            yield await SSEResponse.send_error(f"处理失败: {str(e)}")
+
+    return create_sse_response(generate())
+
+
 # ==================== Skill 管理 CRUD API ====================
 
 @router.get("/detail/{skill_key:path}")
@@ -183,6 +326,8 @@ async def get_skill_detail_api(skill_key: str, user: User = Depends(require_logi
         "template_name": detail["template_name"],
         "display_name": detail.get("display_name", detail["template_name"]),
         "category": detail["category"],
+        "skill_type": detail.get("skill_type", "generic"),
+        "category_hint": detail.get("category_hint", ""),
         "description": detail["description"],
         "triggers": detail.get("triggers", []),
         "body": _get_skill_body(detail.get("raw_content", "")),
@@ -203,6 +348,7 @@ async def create_skill(request: SkillCreateRequest, user: User = Depends(require
             triggers=request.triggers,
             body=request.body,
             references=request.references,
+            skill_type=request.skill_type,
         )
         return {"success": True, "skill": result}
     except ValueError as e:
@@ -226,6 +372,7 @@ async def update_skill(skill_key: str, request: SkillUpdateRequest, user: User =
             triggers=request.triggers,
             body=request.body,
             references=request.references,
+            skill_type=request.skill_type,
         )
         return {"success": True, "skill": result}
     except ValueError as e:

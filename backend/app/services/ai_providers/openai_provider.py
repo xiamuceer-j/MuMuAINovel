@@ -48,6 +48,7 @@ class OpenAIProvider(BaseAIProvider):
         tools: Optional[List[Dict]] = None,
         tool_choice: Optional[str] = None,
         user_id: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         messages = []
         if system_prompt:
@@ -68,6 +69,7 @@ class OpenAIProvider(BaseAIProvider):
                 max_tokens=max_tokens,
                 tools=tools,
                 tool_choice=actual_tool_choice,
+                reasoning_effort=reasoning_effort,
             ):
                 # 检查是否有工具调用
                 if chunk.get("tool_calls"):
@@ -115,14 +117,19 @@ class OpenAIProvider(BaseAIProvider):
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
         ):
             if isinstance(chunk, dict):
                 if chunk.get("usage"):
                     yield {"usage": chunk.get("usage")}
                 if chunk.get("finish_reason"):
                     yield {"finish_reason": chunk.get("finish_reason")}
+                if chunk.get("reasoning_content"):
+                    # 思考内容（推理模型），不混入正文，可选转发给前端
+                    yield {"reasoning_content": chunk["reasoning_content"]}
                 if chunk.get("content"):
                     yield chunk["content"]
+                # 其他 dict 类型（done 等）静默忽略
             else:
                 yield chunk
 

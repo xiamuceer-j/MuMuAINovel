@@ -86,11 +86,17 @@ class ChapterRegenerator:
             target_word_count = regenerate_request.target_word_count
             accumulated_length = 0
             
-            async for chunk in self.ai_service.generate_text_stream(
-                prompt=full_prompt,
-                system_prompt=system_prompt_with_style,
-                temperature=0.7
-            ):
+            # 如果请求中指定了模型，使用该模型
+            gen_kwargs = {
+                "prompt": full_prompt,
+                "system_prompt": system_prompt_with_style,
+                "temperature": 0.7
+            }
+            if regenerate_request.model:
+                gen_kwargs["model"] = regenerate_request.model
+                logger.info(f"  重新生成使用自定义模型: {regenerate_request.model}")
+
+            async for chunk in self.ai_service.generate_text_stream(**gen_kwargs):
                 # 发送内容块
                 yield {'type': 'chunk', 'content': chunk}
                 

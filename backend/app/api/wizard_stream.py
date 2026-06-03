@@ -5,6 +5,7 @@ from sqlalchemy import select
 from typing import Dict, Any, AsyncGenerator
 import json
 import re
+import asyncio
 
 from app.database import get_db
 from app.models.project import Project
@@ -777,7 +778,11 @@ async def characters_generator(
                         characters_data = [characters_data]
                     
                     # 严格验证生成数量是否精确匹配
-                    if len(characters_data) != current_batch_size:
+                    if len(characters_data) > current_batch_size:
+                        # AI多生成了，取前N个即可
+                        logger.warning(f"批次{batch_idx+1}生成数量偏多: 期望{current_batch_size}个, 实际{len(characters_data)}个, 截取前{current_batch_size}个")
+                        characters_data = characters_data[:current_batch_size]
+                    elif len(characters_data) < current_batch_size:
                         error_msg = f"批次{batch_idx+1}生成数量不正确: 期望{current_batch_size}个, 实际{len(characters_data)}个"
                         logger.error(error_msg)
                         
@@ -1392,18 +1397,30 @@ async def outline_generator(
         logger.info(f"✅ 成功创建{len(created_outlines)}个大纲节点")
         
         # 🎭 角色校验：检查大纲structure中的characters是否存在对应角色
+        # 使用后台任务 + 心跳保活，避免长时间AI调用导致SSE连接断开
         yield await tracker.saving("🎭 校验角色信息...", 0.5)
         try:
             from app.services.auto_character_service import get_auto_character_service
             
             auto_char_service = get_auto_character_service(user_ai_service)
-            char_check_result = await auto_char_service.check_and_create_missing_characters(
-                project_id=project_id,
-                outline_data_list=outline_data[:outline_count],
-                db=db,
-                user_id=user_id,
-                enable_mcp=enable_mcp
+            
+            # 将角色校验放到后台任务中执行，同时在等待期间发送心跳包保持连接活跃
+            char_check_task = asyncio.create_task(
+                auto_char_service.check_and_create_missing_characters(
+                    project_id=project_id,
+                    outline_data_list=outline_data[:outline_count],
+                    db=db,
+                    user_id=user_id,
+                    enable_mcp=enable_mcp
+                )
             )
+            
+            # 等待任务完成，期间每5秒发送一次心跳
+            while not char_check_task.done():
+                yield await tracker.heartbeat()
+                await asyncio.sleep(5)
+            
+            char_check_result = char_check_task.result()
             if char_check_result["created_count"] > 0:
                 created_names = [c.name for c in char_check_result["created_characters"]]
                 logger.info(f"🎭 向导大纲：自动创建了 {char_check_result['created_count']} 个角色: {', '.join(created_names)}")
@@ -1415,18 +1432,30 @@ async def outline_generator(
             logger.error(f"⚠️ 向导大纲角色校验失败（不影响主流程）: {e}")
         
         # 🏛️ 组织校验：检查大纲structure中的characters（type=organization）是否存在对应组织
+        # 使用后台任务 + 心跳保活，避免长时间AI调用导致SSE连接断开
         yield await tracker.saving("🏛️ 校验组织信息...", 0.55)
         try:
             from app.services.auto_organization_service import get_auto_organization_service
             
             auto_org_service = get_auto_organization_service(user_ai_service)
-            org_check_result = await auto_org_service.check_and_create_missing_organizations(
-                project_id=project_id,
-                outline_data_list=outline_data[:outline_count],
-                db=db,
-                user_id=user_id,
-                enable_mcp=enable_mcp
+            
+            # 将组织校验放到后台任务中执行，同时在等待期间发送心跳包保持连接活跃
+            org_check_task = asyncio.create_task(
+                auto_org_service.check_and_create_missing_organizations(
+                    project_id=project_id,
+                    outline_data_list=outline_data[:outline_count],
+                    db=db,
+                    user_id=user_id,
+                    enable_mcp=enable_mcp
+                )
             )
+            
+            # 等待任务完成，期间每5秒发送一次心跳
+            while not org_check_task.done():
+                yield await tracker.heartbeat()
+                await asyncio.sleep(5)
+            
+            org_check_result = org_check_task.result()
             if org_check_result["created_count"] > 0:
                 created_names = [c.name for c in org_check_result["created_organizations"]]
                 logger.info(f"🏛️ 向导大纲：自动创建了 {org_check_result['created_count']} 个组织: {', '.join(created_names)}")
@@ -1440,10 +1469,26 @@ async def outline_generator(
         # 根据项目的大纲模式决定是否自动创建章节
         created_chapters = []
         if project.outline_mode == 'one-to-one':
-            # 一对一模式：自动为每个大纲创建对应的章节
+            # 一对一模式：自动为每个大纲创建对应的章节（检查是否已存在，避免重复）
             yield await tracker.saving("一对一模式：自动创建章节...", 0.7)
-            
+
+            # 先查询已存在的章节，避免重复创建
+            existing_chapters_result = await db.execute(
+                select(Chapter).where(Chapter.project_id == project_id)
+            )
+            existing_chapters = existing_chapters_result.scalars().all()
+            existing_chapter_numbers = {ch.chapter_number for ch in existing_chapters}
+
+            created_count = 0
+            skipped_count = 0
+
             for outline in created_outlines:
+                # 检查是否已存在相同chapter_number的章节
+                if outline.order_index in existing_chapter_numbers:
+                    skipped_count += 1
+                    logger.info(f"一对一模式：跳过大纲 {outline.title}（序号{outline.order_index}），章节已存在")
+                    continue
+
                 chapter = Chapter(
                     project_id=project_id,
                     title=outline.title,
@@ -1454,13 +1499,16 @@ async def outline_generator(
                 )
                 db.add(chapter)
                 created_chapters.append(chapter)
-            
-            await db.flush()
-            for chapter in created_chapters:
-                await db.refresh(chapter)
-            
-            logger.info(f"✅ 一对一模式：自动创建了{len(created_chapters)}个章节")
-            yield await tracker.saving(f"已自动创建{len(created_chapters)}个章节", 0.9)
+                existing_chapter_numbers.add(outline.order_index)  # 防止同一批次重复
+                created_count += 1
+
+            if created_chapters:
+                await db.flush()
+                for chapter in created_chapters:
+                    await db.refresh(chapter)
+
+            logger.info(f"✅ 一对一模式：自动创建了{created_count}个章节（跳过{skipped_count}个已存在的章节）")
+            yield await tracker.saving(f"已自动创建{created_count}个章节（跳过{skipped_count}个已存在的章节）", 0.9)
         else:
             # 一对多模式：跳过自动创建，用户可手动展开
             yield await tracker.saving("细化模式：跳过自动创建章节", 0.9)

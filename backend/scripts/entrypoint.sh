@@ -84,6 +84,31 @@ else
 fi
 
 echo "================================================"
+echo "📁 同步内置 Skills..."
+echo "================================================"
+
+# 将内置 Skills 同步到持久化目录（仅首次部署或新增内置 Skill 时）
+PERSISTENT_SKILLS="/app/storage/skills"
+DEFAULT_SKILLS="/app/app/skills-default"
+
+if [ -d "$DEFAULT_SKILLS" ]; then
+    mkdir -p "$PERSISTENT_SKILLS"
+    for skill_dir in "$DEFAULT_SKILLS"/*/; do
+        skill_name=$(basename "$skill_dir")
+        # 只同步持久化目录中不存在的 Skill（不覆盖用户创建/修改的同名 Skill）
+        if [ ! -d "$PERSISTENT_SKILLS/$skill_name" ]; then
+            cp -r "$skill_dir" "$PERSISTENT_SKILLS/$skill_name"
+            echo "   ✅ 同步内置 Skill: $skill_name"
+        else
+            echo "   ⏭️  跳过已有 Skill: $skill_name"
+        fi
+    done
+    echo "✅ Skills 同步完成"
+else
+    echo "⚠️  未找到内置 Skills 备份目录"
+fi
+
+echo "================================================"
 echo "🎉 启动应用服务..."
 echo "================================================"
 

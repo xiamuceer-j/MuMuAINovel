@@ -1,8 +1,28 @@
 import { useState, useEffect } from 'react';
-import { Button, Table, Modal, Form, Input, Tag, Space, message, Popconfirm, Card, theme, Empty, Badge, Select } from 'antd';
+import { Button, Table, Modal, Form, Input, Tag, Space, message, Popconfirm, Card, theme, Empty, Badge, Select, Tooltip } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, ThunderboltOutlined, FileTextOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
+
+// 辅助函数：触发词数组 ↔ 字符串
+const formatTriggers = (triggers: string[] | undefined | null): string => {
+  if (!triggers || !Array.isArray(triggers)) return '';
+  return triggers.join(', ');
+};
+
+const parseTriggers = (text: string | undefined | null): string[] => {
+  if (!text || typeof text !== 'string') return [];
+  return text
+    .split(/[,，\n;；]+/)
+    .map(t => t.trim())
+    .filter(t => t.length > 0);
+};
+
+// 辅助函数：归一化分类（trim 后返回，空则返回空串）
+const normalizeCategory = (category: string | undefined | null): string => {
+  if (!category || typeof category !== 'string') return '';
+  return category.trim();
+};
 
 interface SkillItem {
   template_key: string;
@@ -82,9 +102,11 @@ export default function SkillManage() {
         editForm.setFieldsValue({
           skill_type: detail.skill_type || 'generic',
           description: detail.description,
-          triggers: formatTriggers(detail.triggers),
+          triggers: formatTriggers(detail.triggers || []),
           body: detail.body,
-          references: JSON.stringify(detail.standalone_references, null, 2),
+          references: detail.standalone_references && Object.keys(detail.standalone_references).length > 0
+            ? JSON.stringify(detail.standalone_references, null, 2)
+            : '',
         });
         setEditModalVisible(true);
       } else {
@@ -129,16 +151,12 @@ export default function SkillManage() {
 
       const triggers = parseTriggers(values.triggers);
       if (triggers.length === 0) {
-        message.error('请至少填写一个触发词');
+        message.error('请至少填写一个触发词（也可以写在描述里，运行时会自动提取）');
         setSaving(false);
         return;
       }
-      const category = normalizeCategory(values.category);
-      if (!category) {
-        message.error('请选择或输入分类');
-        setSaving(false);
-        return;
-      }
+      // category 不再单独表单输入，由 skill_type 在后端自动映射
+      const category = normalizeCategory(values.skill_type);
 
       const response = await fetch(`/api/skills/update/${editingSkill.template_key}`, {
         method: 'PUT',
@@ -187,16 +205,12 @@ export default function SkillManage() {
 
       const triggers = parseTriggers(values.triggers);
       if (triggers.length === 0) {
-        message.error('请至少填写一个触发词');
+        message.error('请至少填写一个触发词（也可以写在描述里，运行时会自动提取）');
         setSaving(false);
         return;
       }
-      const category = normalizeCategory(values.category);
-      if (!category) {
-        message.error('请选择或输入分类');
-        setSaving(false);
-        return;
-      }
+      // category 不再单独表单输入，由 skill_type 在后端自动映射
+      const category = normalizeCategory(values.skill_type);
 
       const response = await fetch('/api/skills/create', {
         method: 'POST',
@@ -488,6 +502,10 @@ export default function SkillManage() {
               ))}
             </Select>
           </Form.Item>
+          <Form.Item label="触发词" name="triggers" rules={[{ required: true, message: '请输入触发词' }]}
+            tooltip="多个触发词用逗号、分号或换行分隔。例如：去AI味,deslop">
+            <TextArea rows={2} placeholder="去AI味, deslop, 润色（用逗号/分号/换行分隔）" />
+          </Form.Item>
           <Form.Item label="描述" name="description" rules={[{ required: true, message: '请输入描述' }]}
             tooltip="第一句话会作为 UI 显示名称">
             <TextArea rows={3} placeholder="一句话描述 Skill 功能。后续详细说明..." />
@@ -535,6 +553,10 @@ export default function SkillManage() {
                 </Select.Option>
               ))}
             </Select>
+          </Form.Item>
+          <Form.Item label="触发词" name="triggers" rules={[{ required: true, message: '请输入触发词' }]}
+            tooltip="多个触发词用逗号、分号或换行分隔。例如：去AI味,deslop。运行时会自动加上 /<skill-name> 作为默认触发词">
+            <TextArea rows={2} placeholder="去AI味, deslop, 润色（用逗号/分号/换行分隔）" />
           </Form.Item>
           <Form.Item label="描述" name="description" rules={[{ required: true, message: '请输入描述' }]}
             tooltip="第一句话会作为 UI 显示名称">

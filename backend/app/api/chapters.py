@@ -3439,7 +3439,8 @@ async def execute_batch_generation_in_order(
                         previous_summary_context=last_generated_summary,
                         skill_key=skill_key,
                         reasoning_effort=reasoning_effort,
-                        narrative_perspective=narrative_perspective
+                        narrative_perspective=narrative_perspective,
+                        batch_id=batch_id
                     )
 
                     await db_session.refresh(task)
@@ -3612,7 +3613,8 @@ async def generate_single_chapter_for_batch(
     previous_summary_context: Optional[str] = None,
     skill_key: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
-    narrative_perspective: Optional[str] = None
+    narrative_perspective: Optional[str] = None,
+    batch_id: Optional[str] = None
 ) -> Optional[str]:
     """
     为批量生成执行单个章节的生成（非流式）

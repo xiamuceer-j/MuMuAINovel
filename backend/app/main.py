@@ -72,7 +72,6 @@ async def lifespan(app: FastAPI):
     # 🔧 启动时清理上次异常退出遗留的"孤儿"分析任务
     try:
         from app.models.analysis_task import AnalysisTask
-        from datetime import datetime, timedelta
         from sqlalchemy import select, update
 
         _cleanup_engine = await get_engine("system")

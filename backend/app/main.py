@@ -69,6 +69,40 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"后台任务表检查失败（不影响启动）: {e}")
 
+    # 🔧 启动时清理上次异常退出遗留的"孤儿"分析任务
+    try:
+        from app.models.analysis_task import AnalysisTask
+        from sqlalchemy import select, update
+
+        _cleanup_engine = await get_engine("system")
+        async with _cleanup_engine.begin() as conn:
+            await conn.run_sync(
+                lambda sync_conn: AnalysisTask.__table__.create(sync_conn, checkfirst=True)
+            )
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as CleanupSession
+        CleanupSessionLocal = async_sessionmaker(_cleanup_engine, class_=CleanupSession, expire_on_commit=False)
+        async with CleanupSessionLocal() as cleanup_db:
+            # 清理所有仍在 running/pending 状态的任务（服务器重启意味着它们不可能完成了）
+            stale_result = await cleanup_db.execute(
+                select(AnalysisTask).where(
+                    AnalysisTask.status.in_(['running', 'pending'])
+                )
+            )
+            stale_tasks = stale_result.scalars().all()
+            if stale_tasks:
+                for t in stale_tasks:
+                    t.status = 'failed'
+                    t.error_message = '服务器重启，任务被自动恢复'
+                    t.completed_at = datetime.now()
+                    t.progress = 0
+                await cleanup_db.commit()
+                logger.info(f"🔧 已清理 {len(stale_tasks)} 个重启前遗留的分析任务")
+            else:
+                logger.info("🔧 无遗留分析任务需要清理")
+    except Exception as e:
+        logger.warning(f"⚠️ 清理遗留分析任务失败（不影响启动）: {e}")
+
     logger.info("应用启动完成")
     
     yield

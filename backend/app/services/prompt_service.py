@@ -2649,6 +2649,9 @@ class PromptService:
         """
         格式化提示词模板
         
+        使用安全替换：只替换 kwargs 中提供的变量，未提供的变量保持原样。
+        这样用户自定义模板中可以包含代码未预期的变量而不会报错。
+        
         Args:
             template: 提示词模板
             **kwargs: 模板参数
@@ -2656,10 +2659,31 @@ class PromptService:
         Returns:
             格式化后的提示词
         """
+        import re
+        
+        # 先尝试正常 format，如果所有变量都匹配则直接返回
         try:
             return template.format(**kwargs)
-        except KeyError as e:
-            raise ValueError(f"缺少必需的参数: {e}")
+        except KeyError:
+            pass
+        
+        # 安全替换：逐个替换已知变量，忽略未知变量
+        # 匹配 {var_name} 但不匹配 {{escaped braces}}
+        def _safe_replace(match):
+            key = match.group(1)
+            if key in kwargs:
+                return str(kwargs[key])
+            return match.group(0)  # 保留原样
+        
+        # 先处理转义的大括号 {{ 和 }}
+        # 用临时占位符保护
+        protected = template.replace('{{', '\x00ESCAPED_OPEN\x00').replace('}}', '\x00ESCAPED_CLOSE\x00')
+        # 替换 {key} 格式的变量
+        result = re.sub(r'\{([^{}]+)\}', _safe_replace, protected)
+        # 恢复转义的大括号
+        result = result.replace('\x00ESCAPED_OPEN\x00', '{').replace('\x00ESCAPED_CLOSE\x00', '}')
+        
+        return result
     
 
     @classmethod

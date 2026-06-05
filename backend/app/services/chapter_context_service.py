@@ -19,6 +19,100 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 
 
+# ==================== 大纲结构化字段通用格式化工具 ====================
+
+# 已知字段的中文标签映射（用于友好显示）；未列出的 key 会直接用 key 名作为标签
+_OUTLINE_FIELD_LABELS: Dict[str, str] = {
+    'summary': '章节概要',
+    'scenes': '场景设定',
+    'key_points': '情节要点',
+    'emotion': '情感基调',
+    'emotional_tone': '情感基调',
+    'goal': '叙事目标',
+    'narrative_goal': '叙事目标',
+    'obstacle_type': '障碍类型',
+    'conflict_type': '冲突类型',
+    'hook_type': '钩子类型',
+    'chapter_breath': '章节节奏',
+    'ending_type': '结尾类型',
+    'estimated_words': '预估字数',
+    'key_events': '关键事件',
+    'character_focus': '角色焦点',
+    'plot_summary': '剧情摘要',
+    'notes': '备注',
+    'extra_requirements': '附加要求',
+    'pov': '视角',
+    'tone': '基调',
+    'setting': '场景设定',
+    'themes': '主题',
+    'world_building': '世界观设定',
+    'flashback': '闪回',
+    'time_skip': '时间跳跃',
+    'cliffhanger': '悬念',
+    'twist': '反转',
+    'stakes': '危机/筹码',
+    'motivation': '动机',
+    'character_arc': '角色弧光',
+    'relationship_change': '关系变化',
+}
+
+# 这些字段不应进入通用文本输出（要么是结构化字段由其他逻辑单独处理，要么已同步到 outline 列）
+_OUTLINE_SKIP_FIELDS = {
+    'title',            # 已同步到 outline.title
+    'content',          # 已同步到 outline.content
+    'characters',       # 角色筛选字段，由 _build_chapter_characters_xxx 单独处理
+    'order_index',      # 排序字段，不需要进 prompt
+}
+
+
+def _format_outline_structure_to_text(structure: Dict[str, Any]) -> str:
+    """把 outline.structure 的 JSON dict 遍历输出为人类可读文本（一劳永逸方案）。
+
+    遍历所有 key，未来用户在大纲中添加的任何额外字段（如 obstacle_type / hook_type /
+    chapter_breath）都会自动进入章节生成的提示词，无需修改代码。
+
+    - 标量字段：以【标签】\\n值 的形式输出
+    - 列表字段：以【标签】\\n- item1\\n- item2 的形式输出
+    - 字典字段：以 yaml 风格输出（保留嵌套结构）
+    - _OUTLINE_SKIP_FIELDS 中的字段会被跳过（由其他逻辑处理）
+
+    Args:
+        structure: 从 outline.structure 解析出来的 dict
+
+    Returns:
+        拼好的可读文本，可直接拼进章节生成 prompt
+    """
+    if not isinstance(structure, dict):
+        return ""
+
+    parts: List[str] = []
+    for key, value in structure.items():
+        if key in _OUTLINE_SKIP_FIELDS:
+            continue
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+
+        label = _OUTLINE_FIELD_LABELS.get(key, key)
+
+        if isinstance(value, list):
+            if not value:
+                continue
+            text = "\n".join(f"- {item}" for item in value)
+            parts.append(f"【{label}】\n{text}")
+        elif isinstance(value, dict):
+            # 字典类型，用 json 缩进输出（避免引入 yaml 依赖）
+            try:
+                text = json.dumps(value, ensure_ascii=False, indent=2)
+                parts.append(f"【{label}】\n{text}")
+            except (TypeError, ValueError):
+                parts.append(f"【{label}】\n{value}")
+        else:
+            # 标量（字符串/数字/布尔）
+            parts.append(f"【{label}】\n{value}")
+
+    return "\n\n".join(parts)
+
+
 @dataclass
 class OneToManyContext:
     """
@@ -302,8 +396,18 @@ class OneToManyContextBuilder:
                 return outline_content
             except json.JSONDecodeError:
                 pass
-        
-        # 回退到大纲内容
+
+        # 2. 回退到 outline.structure，遍历所有字段（包括用户自定义的额外字段）
+        if outline and outline.structure:
+            try:
+                structure = json.loads(outline.structure)
+                text = _format_outline_structure_to_text(structure)
+                if text:
+                    return text
+            except json.JSONDecodeError:
+                logger.warning("  ⚠️ 解析 outline.structure 失败，回退到 content")
+
+        # 3. 最终回退到 outline.content / chapter.summary
         return outline.content if outline else chapter.summary or '暂无大纲'
     
     async def _build_chapter_characters_1n(
@@ -1201,32 +1305,21 @@ class OneToOneContextBuilder:
         outline: Optional[Outline],
         chapter: Chapter
     ) -> str:
-        """从outline.structure提取大纲信息（1-1模式专用）"""
+        """从outline.structure提取大纲信息（1-1模式专用，一劳永逸版本）
+
+        会遍历 outline.structure 中的所有字段（除 characters / title / order_index 等
+        结构化字段外），自动拼成人类可读文本。这意味着未来用户在大纲中添加任何额外字段
+        （例如 obstacle_type / hook_type / chapter_breath 等）都会自动进入章节生成提示词，
+        无需再修改这段代码。
+        """
         if outline and outline.structure:
             try:
                 structure = json.loads(outline.structure)
-                
-                outline_parts = []
-                
-                if structure.get('summary'):
-                    outline_parts.append(f"【章节概要】\n{structure['summary']}")
-                
-                if structure.get('scenes'):
-                    scenes_text = "\n".join([f"- {scene}" for scene in structure['scenes']])
-                    outline_parts.append(f"【场景设定】\n{scenes_text}")
-                
-                if structure.get('key_points'):
-                    points_text = "\n".join([f"- {point}" for point in structure['key_points']])
-                    outline_parts.append(f"【情节要点】\n{points_text}")
-                
-                if structure.get('emotion'):
-                    outline_parts.append(f"【情感基调】\n{structure['emotion']}")
-                
-                if structure.get('goal'):
-                    outline_parts.append(f"【叙事目标】\n{structure['goal']}")
-                
-                return "\n\n".join(outline_parts)
-                
+                text = _format_outline_structure_to_text(structure)
+                if text:
+                    return text
+                # 所有字段都被跳过（罕见），回退到 content
+                return outline.content or "暂无大纲"
             except json.JSONDecodeError as e:
                 logger.error(f"  ❌ 解析outline.structure失败: {e}")
                 return outline.content if outline else "暂无大纲"

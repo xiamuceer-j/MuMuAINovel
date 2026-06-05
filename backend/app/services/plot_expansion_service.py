@@ -16,6 +16,58 @@ from app.logger import get_logger, safe_preview
 logger = get_logger(__name__)
 
 
+# ==================== 大纲 structure 额外字段提取工具（一劳永逸方案） ====================
+
+# 已通过 outline.content 或单独白名单处理的字段，不需要拼到 prompt 中的 outline_content
+_OUTLINE_PROMPT_SKIP_KEYS = {
+    'title',          # 已同步到 outline.title
+    'summary',        # 已通过 outline.content 体现
+    'content',        # 已通过 outline.content 体现
+    'characters',     # 角色筛选字段，单独处理
+    'order_index',    # 排序字段
+    'scenes',         # 场景字段单独列出
+    'key_points',     # 关键事件单独列出
+    'emotion',        # 情感基调单独列出
+    'emotional_tone',
+    'goal',           # 叙事目标单独列出
+    'narrative_goal',
+}
+
+
+def _build_outline_extra_fields_text(outline: Optional[Outline]) -> str:
+    """从 outline.structure 中提取额外字段（除已白名单处理的字段外），
+    拼成可读文本附加到 prompt 的 outline_content 中。
+
+    这样 AI 在生成章节规划时就能看到用户自定义的 obstacle_type / hook_type /
+    chapter_breath 等额外字段，并自然地继承到生成的 expansion_plan 里。
+    未来用户添加任何新字段都会自动生效，无需修改代码。
+    """
+    if not outline or not outline.structure:
+        return ""
+    try:
+        structure = json.loads(outline.structure)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(structure, dict):
+        return ""
+
+    parts = []
+    for k, v in structure.items():
+        if k in _OUTLINE_PROMPT_SKIP_KEYS:
+            continue
+        if v is None or v == "" or v == [] or v == {}:
+            continue
+        if isinstance(v, list):
+            parts.append(f"{k}: {', '.join(str(x) for x in v)}")
+        elif isinstance(v, dict):
+            parts.append(f"{k}: {json.dumps(v, ensure_ascii=False)}")
+        else:
+            parts.append(f"{k}: {v}")
+    if not parts:
+        return ""
+    return "\n[额外章节设定] " + " | ".join(parts)
+
+
 class PlotExpansionService:
     """大纲剧情展开服务"""
     
@@ -124,7 +176,7 @@ class PlotExpansionService:
             characters_info=characters_info or '暂无角色',
             outline_order_index=outline.order_index,
             outline_title=outline.title,
-            outline_content=outline.content,
+            outline_content=(outline.content or '') + _build_outline_extra_fields_text(outline),
             context_info=context_info,
             strategy_instruction=expansion_strategy,
             target_chapter_count=target_chapter_count,
@@ -250,7 +302,7 @@ class PlotExpansionService:
                 characters_info=characters_info or '暂无角色',
                 outline_order_index=outline.order_index,
                 outline_title=outline.title,
-                outline_content=outline.content,
+                outline_content=(outline.content or '') + _build_outline_extra_fields_text(outline),
                 context_info=context_info,
                 previous_context=previous_context,
                 strategy_instruction=expansion_strategy,
@@ -441,8 +493,10 @@ class PlotExpansionService:
         
         chapters = []
         for idx, plan in enumerate(chapter_plans):
-            # 保存完整的展开规划数据（JSON格式）
-            expansion_plan_json = json.dumps({
+            # 保存完整的展开规划数据（JSON格式，一劳永逸版本）
+            # 保留 AI 返回的所有字段（包括可能从 outline.structure 继承的额外字段，
+            # 例如 obstacle_type / hook_type / chapter_breath 等），未来加字段无需改这里
+            _plan_data = {
                 "key_events": plan.get("key_events", []),
                 "character_focus": plan.get("character_focus", []),
                 "emotional_tone": plan.get("emotional_tone", ""),
@@ -450,7 +504,12 @@ class PlotExpansionService:
                 "conflict_type": plan.get("conflict_type", ""),
                 "estimated_words": plan.get("estimated_words", 3000),
                 "scenes": plan.get("scenes", []) if plan.get("scenes") else None
-            }, ensure_ascii=False)
+            }
+            # 把 AI 返回的、不在上面白名单中的其它字段全部合并进来（一劳永逸）
+            for _k, _v in plan.items():
+                if _k not in _plan_data and _k not in ("title", "plot_summary", "sub_index"):
+                    _plan_data[_k] = _v
+            expansion_plan_json = json.dumps(_plan_data, ensure_ascii=False)
             
             chapter = Chapter(
                 project_id=project_id,

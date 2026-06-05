@@ -38,6 +38,61 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _normalize_traits_to_string_list(traits: Any) -> List[str]:
+    """
+    将 traits 规范化为扁平的字符串列表。
+
+    数据库中 Character.traits 存储为 JSON 字符串，期望是扁平字符串列表，
+    但 AI 生成数据时偶发会写入嵌套列表（如 ["特征1", ["副职业：xxx"]]），
+    这会导致 Pydantic 的 List[str] 校验失败。
+
+    本函数递归扁平化嵌套列表/元组，将所有非字符串原子值转为字符串，
+    过滤 None 与空字符串，保证返回值始终符合 List[str] 约束。
+    """
+    if traits is None:
+        return []
+
+    # 字符串：先尝试 JSON 解析（兼容历史数据以 JSON 字符串形式存在的情况）
+    if isinstance(traits, str):
+        s = traits.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            return _normalize_traits_to_string_list(parsed)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            # 不是合法 JSON，原样作为单元素返回，不再切分（避免误伤含分隔符的文案）
+            return [s]
+
+    # 列表/元组：递归扁平化
+    if isinstance(traits, (list, tuple)):
+        result: List[str] = []
+        for item in traits:
+            if item is None:
+                continue
+            if isinstance(item, (list, tuple)):
+                # 嵌套结构，递归处理
+                result.extend(_normalize_traits_to_string_list(list(item)))
+            elif isinstance(item, dict):
+                # dict 不应该出现在 traits 中，转为 JSON 字符串保留信息
+                try:
+                    s = json.dumps(item, ensure_ascii=False)
+                    if s not in ("{}", "null"):
+                        result.append(s)
+                except Exception:
+                    pass
+            else:
+                # 字符串、数字、布尔等统一转为字符串
+                text = str(item).strip()
+                if text:
+                    result.append(text)
+        return result
+
+    # 其他类型（数字、布尔等），统一转字符串
+    text = str(traits).strip()
+    return [text] if text else []
+
+
 class ImportExportService:
     """导入导出服务类"""
     
@@ -238,13 +293,12 @@ class ImportExportService:
         
         exported = []
         for char in characters:
-            # 解析traits JSON
-            traits = None
-            if char.traits:
-                try:
-                    traits = json.loads(char.traits) if isinstance(char.traits, str) else char.traits
-                except Exception:
-                    traits = None
+            # 解析 traits JSON 并规范化为扁平字符串列表
+            # 注意：DB 中可能存在嵌套列表等不规范数据，需通过规范化函数处理，
+            # 否则 Pydantic 的 List[str] 校验会失败导致整个导出 500。
+            traits = _normalize_traits_to_string_list(char.traits)
+            # 规范化后若为空列表则保持 schema 默认 None 语义
+            traits = traits if traits else None
             
             exported.append(CharacterExportData(
                 name=char.name,
@@ -914,10 +968,11 @@ class ImportExportService:
         char_mapping = {}
         
         for char_data in characters_data:
-            # 处理traits
+            # 处理 traits：先规范化为扁平字符串列表再序列化为 JSON 字符串入库
+            # 这样可避免历史脏数据（嵌套列表）在新项目中被再次复制
             traits = char_data.get("traits")
-            if isinstance(traits, list):
-                traits = json.dumps(traits, ensure_ascii=False)
+            normalized_traits = _normalize_traits_to_string_list(traits)
+            traits_json = json.dumps(normalized_traits, ensure_ascii=False) if normalized_traits else None
             
             character = Character(
                 project_id=project_id,
@@ -929,7 +984,7 @@ class ImportExportService:
                 personality=char_data.get("personality"),
                 background=char_data.get("background"),
                 appearance=char_data.get("appearance"),
-                traits=traits,
+                traits=traits_json,
                 organization_type=char_data.get("organization_type"),
                 organization_purpose=char_data.get("organization_purpose")
             )
@@ -1415,13 +1470,10 @@ class ImportExportService:
         # 导出角色数据
         exported_characters = []
         for char in characters:
-            # 解析 traits
-            traits = None
-            if char.traits:
-                try:
-                    traits = json.loads(char.traits) if isinstance(char.traits, str) else char.traits
-                except Exception:
-                    traits = None
+            # 解析 traits 并规范化为扁平字符串列表
+            # 这里返回 dict（非 Pydantic 校验），但仍规范化以避免下游再次解析时出错
+            traits = _normalize_traits_to_string_list(char.traits)
+            traits = traits if traits else None
             
             # 基础角色数据
             char_data = {
@@ -1562,11 +1614,11 @@ class ImportExportService:
                         skipped.append(name)
                         continue
                     
-                    # 处理traits
+                    # 处理 traits：规范化为扁平字符串列表后入库，避免脏数据复制
                     traits = char_data.get("traits")
-                    if isinstance(traits, list):
-                        traits = json.dumps(traits, ensure_ascii=False)
-                    
+                    normalized_traits = _normalize_traits_to_string_list(traits)
+                    traits = json.dumps(normalized_traits, ensure_ascii=False) if normalized_traits else None
+
                     is_organization = char_data.get("is_organization", False)
                     
                     # 创建角色

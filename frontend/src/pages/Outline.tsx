@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
 import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs, Pagination, theme } from 'antd';
-import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined, MinusCircleOutlined, TagsOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { eventBus } from '../store/eventBus';
 import { getProjectTasks, type TaskStatus } from '../services/backgroundTaskService';
@@ -80,6 +80,66 @@ interface OutlineStructureData {
   title?: string;
   summary?: string;
   content?: string;
+  // 🔧 允许任意额外字段（一劳永逸方案：用户/AI 添加的 obstacle_type、hook_type、chapter_breath 等都自动保留）
+  [key: string]: unknown;
+}
+
+// 🔧 已知/已单独处理的 structure 字段白名单（用于"额外字段"展示和编辑）
+const KNOWN_STRUCTURE_KEYS = new Set<string>([
+  'title',
+  'summary',
+  'content',
+  'characters',
+  'characters_involved',
+  'scenes',
+  'key_events',
+  'key_points',
+  'emotion',
+  'goal',
+]);
+
+// 🔧 额外字段中文标签映射（与后端 _OUTLINE_FIELD_LABELS 保持一致）
+const EXTRA_FIELD_LABELS: Record<string, string> = {
+  emotional_tone: '情感基调',
+  narrative_goal: '叙事目标',
+  obstacle_type: '障碍类型',
+  conflict_type: '冲突类型',
+  hook_type: '钩子类型',
+  chapter_breath: '章节节奏',
+  ending_type: '结尾类型',
+  estimated_words: '预估字数',
+  character_focus: '角色焦点',
+  plot_summary: '剧情摘要',
+  notes: '备注',
+  pov: '视角',
+  tone: '基调',
+  setting: '场景设定',
+  themes: '主题',
+  stakes: '危机/筹码',
+  motivation: '动机',
+  character_arc: '角色弧光',
+  relationship_change: '关系变化',
+};
+
+// 🔧 获取额外字段 label（未知字段返回原 key）
+function getExtraFieldLabel(key: string): string {
+  return EXTRA_FIELD_LABELS[key] || key;
+}
+
+// 🔧 把任意值渲染成字符串（list / dict / primitive）
+function formatExtraFieldValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (Array.isArray(value)) {
+    return value.map((v) => (typeof v === 'object' ? JSON.stringify(v) : String(v))).join(', ');
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
 }
 
 function parseOutlineStructure(structure?: string): OutlineStructureData {
@@ -126,6 +186,10 @@ export default function Outline() {
 
   // ✅ 新增：记录场景区域的展开/折叠状态
   const [scenesExpandStatus, setScenesExpandStatus] = useState<Record<string, boolean>>({});
+
+  // 🔧 编辑表单中的额外字段（一劳永逸：用户/AI 添加的非白名单字段，如 obstacle_type / hook_type / chapter_breath）
+  type ExtraFieldEntry = { key: string; value: string };
+  const [editExtraFields, setEditExtraFields] = useState<ExtraFieldEntry[]>([]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -278,6 +342,18 @@ export default function Outline() {
       // 处理情节要点数据
       const keyPointsText = structureData.key_points ? structureData.key_points.join('\n') : '';
       
+      // 🔧 从 originalStructure 提取额外字段（一劳永逸方案）
+      const extraFields: ExtraFieldEntry[] = [];
+      for (const k of Object.keys(structureData)) {
+        if (KNOWN_STRUCTURE_KEYS.has(k)) continue;
+        const rawVal = (structureData as Record<string, unknown>)[k];
+        const formatted = formatExtraFieldValue(rawVal);
+        if (formatted) {
+          extraFields.push({ key: k, value: formatted });
+        }
+      }
+      setEditExtraFields(extraFields);
+
       // 设置表单初始值
       editForm.setFieldsValue({
         title: outline.title,
@@ -392,10 +468,77 @@ export default function Outline() {
               label="叙事目标"
               name="goal"
               tooltip="本章要达成的叙事目的"
-              style={{ marginBottom: 0 }}
+              style={{ marginBottom: 12 }}
             >
               <Input placeholder="例如：建立世界观对比并完成主角初遇" />
             </Form.Item>
+
+            {/* 🔧 自定义额外字段（一劳永逸方案：让用户能编辑/添加 obstacle_type、hook_type、chapter_breath 等任意字段） */}
+            <div style={{
+              padding: '12px',
+              background: token.colorFillQuaternary,
+              border: `1px dashed ${token.colorBorder}`,
+              borderRadius: token.borderRadius,
+              marginBottom: 0
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 8
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: token.colorTextSecondary }}>
+                  <TagsOutlined /> 自定义字段
+                </span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => setEditExtraFields(prev => [...prev, { key: '', value: '' }])}
+                >
+                  添加字段
+                </Button>
+              </div>
+              <div style={{ fontSize: 11, color: token.colorTextTertiary, marginBottom: 8 }}>
+                AI 生成大纲时可能添加额外字段（如 obstacle_type、hook_type、chapter_breath 等），可在此查看和编辑
+              </div>
+              {editExtraFields.length === 0 ? (
+                <div style={{ fontSize: 12, color: token.colorTextQuaternary, textAlign: 'center', padding: 8 }}>
+                  暂无自定义字段
+                </div>
+              ) : (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {editExtraFields.map((field, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Input
+                        placeholder="字段名（如 obstacle_type）"
+                        value={field.key}
+                        onChange={(e) => {
+                          const newKey = e.target.value.trim();
+                          setEditExtraFields(prev => prev.map((f, i) => i === idx ? { ...f, key: newKey } : f));
+                        }}
+                        style={{ width: '40%' }}
+                      />
+                      <Input
+                        placeholder="字段值"
+                        value={field.value}
+                        onChange={(e) => {
+                          const newVal = e.target.value;
+                          setEditExtraFields(prev => prev.map((f, i) => i === idx ? { ...f, value: newVal } : f));
+                        }}
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        type="text"
+                        danger
+                        icon={<MinusCircleOutlined />}
+                        onClick={() => setEditExtraFields(prev => prev.filter((_, i) => i !== idx))}
+                      />
+                    </div>
+                  ))}
+                </Space>
+              )}
+            </div>
           </Form>
         ),
         okText: '更新',
@@ -457,15 +600,31 @@ export default function Outline() {
               : undefined;
             
             // 合并structure数据，只包含AI实际生成的字段
+            // 🔧 一劳永逸：先剔除原有额外字段，再用 editExtraFields 重新合并
+            const strippedOriginal: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(originalStructure)) {
+              if (KNOWN_STRUCTURE_KEYS.has(k)) {
+                strippedOriginal[k] = v;
+              }
+            }
+            const extraFieldsObj: Record<string, unknown> = {};
+            for (const f of editExtraFields) {
+              const k = f.key.trim();
+              const v = f.value.trim();
+              if (k && v) {
+                extraFieldsObj[k] = v;
+              }
+            }
             const newStructure = {
-              ...originalStructure,
+              ...strippedOriginal,
               title: values.title,
               summary: values.content,
               characters: characters.length > 0 ? characters : undefined,
               scenes: scenes && scenes.length > 0 ? scenes : undefined,
               key_points: keyPoints && keyPoints.length > 0 ? keyPoints : undefined,
               emotion: values.emotion || undefined,
-              goal: values.goal || undefined
+              goal: values.goal || undefined,
+              ...extraFieldsObj
             };
             
             // 更新大纲
@@ -2246,6 +2405,103 @@ export default function Outline() {
                                 </div>
                               </div>
                             )}
+
+                            {/* 🔧 额外字段展示（一劳永逸：自动渲染所有非白名单字段，如 obstacle_type、hook_type、chapter_breath 等） */}
+                            {(() => {
+                              const extraEntries: Array<{ key: string; value: string }> = [];
+                              for (const k of Object.keys(structureData)) {
+                                if (KNOWN_STRUCTURE_KEYS.has(k)) continue;
+                                const rawVal = (structureData as Record<string, unknown>)[k];
+                                const formatted = formatExtraFieldValue(rawVal);
+                                if (formatted) {
+                                  extraEntries.push({ key: k, value: formatted });
+                                }
+                              }
+                              if (extraEntries.length === 0) return null;
+                              return (
+                                <div style={{
+                                  marginTop: 12,
+                                  padding: '10px 12px',
+                                  background: token.colorFillQuaternary,
+                                  borderLeft: `3px solid ${token.colorTextSecondary}`,
+                                  borderRadius: token.borderRadius
+                                }}>
+                                  <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    marginBottom: 8
+                                  }}>
+                                    <span style={{
+                                      fontSize: 13,
+                                      fontWeight: 600,
+                                      color: token.colorTextSecondary,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 4
+                                    }}>
+                                      <TagsOutlined /> 额外设定
+                                      <Tag
+                                        style={{
+                                          margin: 0,
+                                          fontSize: 11,
+                                          borderRadius: 10,
+                                          padding: '0 6px'
+                                        }}
+                                      >
+                                        {extraEntries.length}
+                                      </Tag>
+                                    </span>
+                                  </div>
+                                  <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))',
+                                    gap: 6,
+                                    width: '100%',
+                                    minWidth: 0
+                                  }}>
+                                    {extraEntries.map((entry, idx) => (
+                                      <div
+                                        key={idx}
+                                        style={{
+                                          padding: '6px 10px',
+                                          background: token.colorBgContainer,
+                                          border: `1px solid ${token.colorBorderSecondary}`,
+                                          borderRadius: token.borderRadiusSM,
+                                          fontSize: 12,
+                                          color: token.colorText,
+                                          display: 'flex',
+                                          alignItems: 'flex-start',
+                                          gap: 6,
+                                          width: '100%',
+                                          minWidth: 0,
+                                          boxSizing: 'border-box'
+                                        }}
+                                      >
+                                        <span style={{
+                                          fontWeight: 500,
+                                          color: token.colorTextSecondary,
+                                          flexShrink: 0,
+                                          fontSize: 11
+                                        }}>
+                                          {getExtraFieldLabel(entry.key)}：
+                                        </span>
+                                        <span style={{
+                                          flex: 1,
+                                          lineHeight: '1.5',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap',
+                                          wordBreak: 'break-all'
+                                        }}>
+                                          {entry.value}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                               </>
                             )}
                           </div>

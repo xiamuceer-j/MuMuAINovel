@@ -562,20 +562,47 @@ async def _build_outline_continue_context(
                             else:
                                 outline_text += f"\n  重点角色：{chars}"
                         
-                        # emotion 对应 情感基调
-                        if structure_data.get('emotion'):
-                            outline_text += f"\n  情感基调：{structure_data['emotion']}"
-                        
-                        # goal 对应 叙事目标
-                        if structure_data.get('goal'):
-                            outline_text += f"\n  叙事目标：{structure_data['goal']}"
-                        
-                        # scenes 场景信息（可选显示）
-                        if structure_data.get('scenes'):
-                            scenes = structure_data['scenes']
-                            if isinstance(scenes, list) and scenes:
-                                outline_text += f"\n  场景：{', '.join(scenes)}"
-                            
+                        # 🔧 一劳永逸方案：除 characters / title / order_index 外，所有字段都自动输出
+                        # （未来用户在大纲中添加任何额外字段都会自动进入续写上下文）
+                        _handled_keys = {'title', 'summary', 'content', 'key_points', 'characters', 'order_index'}
+                        _field_labels = {
+                            'emotion': '情感基调',
+                            'emotional_tone': '情感基调',
+                            'goal': '叙事目标',
+                            'narrative_goal': '叙事目标',
+                            'scenes': '场景',
+                            'obstacle_type': '障碍类型',
+                            'conflict_type': '冲突类型',
+                            'hook_type': '钩子类型',
+                            'chapter_breath': '章节节奏',
+                            'ending_type': '结尾类型',
+                            'estimated_words': '预估字数',
+                            'key_events': '关键事件',
+                            'character_focus': '角色焦点',
+                            'plot_summary': '剧情摘要',
+                            'notes': '备注',
+                            'pov': '视角',
+                            'tone': '基调',
+                            'setting': '场景设定',
+                            'themes': '主题',
+                            'stakes': '危机/筹码',
+                            'motivation': '动机',
+                            'character_arc': '角色弧光',
+                            'relationship_change': '关系变化',
+                        }
+                        for k, v in structure_data.items():
+                            if k in _handled_keys:
+                                continue
+                            if v is None or v == "" or v == [] or v == {}:
+                                continue
+                            label = _field_labels.get(k, k)
+                            if isinstance(v, list):
+                                outline_text += f"\n  {label}：{', '.join(str(x) for x in v)}"
+                            elif isinstance(v, dict):
+                                outline_text += f"\n  {label}：{json.dumps(v, ensure_ascii=False)}"
+                            else:
+                                outline_text += f"\n  {label}：{v}"
+
                     except json.JSONDecodeError:
                         # 如果解析失败，使用content字段
                         outline_text += f"\n  内容：{outline.content}"

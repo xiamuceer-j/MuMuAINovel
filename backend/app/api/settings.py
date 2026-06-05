@@ -1055,6 +1055,23 @@ async def test_api_connection(data: ApiTestRequest):
             }
         }
         
+    except json.JSONDecodeError as e:
+        # 上游接口返回了 HTTP 成功状态，但响应体不是合法 JSON。
+        error_msg = str(e)
+        logger.error(f"❌ API 响应解析失败: {error_msg}")
+        logger.error(f"  - 错误类型: {type(e).__name__}")
+        return {
+            "success": False,
+            "message": "API 响应解析失败",
+            "error": error_msg,
+            "error_type": "JSONDecodeError",
+            "suggestions": [
+                "上游服务可能返回了空响应、HTML 错误页或非 OpenAI 兼容 JSON",
+                "请查看后端日志中的 AI HTTP 响应 JSON 解析失败，确认 status、content-type 和 body_preview",
+                "请确认 API Base URL 是否指向正确的 OpenAI 兼容 /v1 接口"
+            ]
+        }
+
     except ValueError as e:
         # 配置错误
         error_msg = str(e)

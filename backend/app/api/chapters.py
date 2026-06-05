@@ -1127,14 +1127,22 @@ async def analyze_chapter_background(
             
             await db_session.commit()
         
-        # 批量添加到向量数据库
+        # 批量添加到向量数据库（带超时保护，防止卡住）
         if memory_records:
-            added_count = await memory_service.batch_add_memories(
-                user_id=user_id,
-                project_id=project_id,
-                memories=memory_records
-            )
-            logger.info(f"✅ 添加{added_count}条记忆到向量库")
+            try:
+                added_count = await asyncio.wait_for(
+                    memory_service.batch_add_memories(
+                        user_id=user_id,
+                        project_id=project_id,
+                        memories=memory_records
+                    ),
+                    timeout=120.0  # 最多等待2分钟
+                )
+                logger.info(f"✅ 添加{added_count}条记忆到向量库")
+            except asyncio.TimeoutError:
+                logger.error(f"❌ 向量数据库写入超时(120秒)，跳过向量记忆（关系数据库记忆已保存）")
+            except Exception as mem_err:
+                logger.error(f"❌ 向量数据库写入失败: {str(mem_err)}，跳过向量记忆（关系数据库记忆已保存）")
         
         # 💼 更新角色职业（根据分析结果）
         if analysis_result.get('character_states'):

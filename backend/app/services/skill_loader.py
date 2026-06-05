@@ -113,6 +113,14 @@ def _parse_yaml_frontmatter(content: str) -> Dict[str, Any]:
         if type_val in SKILL_TYPES:
             result['skill_type'] = type_val
     
+    # 解析 triggers 字段（逗号分隔字符串）
+    triggers_match = re.search(r'^triggers:\s*(.+)$', yaml_text, re.MULTILINE)
+    if triggers_match:
+        triggers_str = triggers_match.group(1).strip().strip('"').strip("'")
+        # 支持 [xxx, yyy] 或 xxx, yyy 格式
+        triggers_str = re.sub(r'^\[|\]$', '', triggers_str).strip()
+        result['triggers'] = [t.strip().strip('"').strip("'") for t in re.split(r'[,，、]+', triggers_str) if t.strip()]
+
     desc_match = re.search(r'description:\s*\|(.*?)(?=^\S|\Z)', yaml_text, re.MULTILINE | re.DOTALL)
     if desc_match:
         desc = desc_match.group(1).strip()
@@ -469,79 +477,146 @@ def _get_write_dir(dir_name: str) -> str:
     return os.path.join(PERSISTENT_SKILLS_DIR, dir_name)
 
 
-def create_skill_files(name: str, description: str, body: str, references: Optional[Dict[str, str]] = None, skill_type: Optional[str] = None) -> Dict:
-    """创建新的 Skill 文件（写入持久化目录）"""
-    import re
-    name = name.strip().lower().replace("_", "-").replace(" ", "-")
-    display_name = (display_name or _display_name_from_description(description, name)).strip()
-    category = (category or _infer_category(name)).strip()
-    triggers = _extract_triggers(name, description, triggers)
-    _validate_skill_metadata(name, display_name, category, description, triggers, body)
+def create_skill_files(
+    name: str,
+    display_name: Optional[str] = None,
+    category: Optional[str] = None,
+    description: str = "",
+    triggers: Optional[List[str]] = None,
+    body: str = "",
+    references: Optional[Dict[str, str]] = None,
+    skill_type: Optional[str] = None,
+) -> Dict:
+    """创建新的 Skill 文件（写入持久化目录）
 
-    # 目录名：小写+短横线
-    dir_name = name
-    dir_name = re.sub(r'[^a-z0-9\-]', '', dir_name)
+    说明:
+    - SKILL.md frontmatter 仅保存 name/description/skill_type（保持简洁）
+    - display_name 不写入文件，运行时从 description 第一句话推断
+    - triggers 不写入文件，运行时从 description 中的 「触发词」/`/xxx` 提取
+    - category 不写入文件，运行时根据 skill_type 从 SKILL_TYPES 映射
+    """
+    import re as _re
+    if not name or not name.strip():
+        raise ValueError("Skill 名称不能为空")
+    if not description or not description.strip():
+        raise ValueError("Skill 描述不能为空")
+    if not body or not body.strip():
+        raise ValueError("Skill 工作流指令不能为空")
+
+    name = name.strip().lower().replace("_", "-").replace(" ", "-")
+    # 规范化目录名：小写+短横线
+    dir_name = _re.sub(r'[^a-z0-9\-]', '', name)
     if not dir_name:
-        dir_name = "new-skill"
-    
+        raise ValueError(f"Skill 名称规范化后为空: {name}")
+
     # 检查两个目录是否已存在同名 Skill
     for base_dir in [PERSISTENT_SKILLS_DIR, SKILLS_DIR]:
         existing = os.path.join(base_dir, dir_name)
         if os.path.exists(existing):
             raise ValueError(f"Skill 目录已存在: {dir_name}")
-    
-    skill_dir = _get_write_dir(dir_name)
-    os.makedirs(skill_dir, exist_ok=True)
-    
-    # 如果未指定 skill_type，根据 name 自动推断
+
+    # 推断默认值（仅用于返回，不写入文件）
+    final_display_name = (display_name or _display_name_from_description(description, name)).strip()
+    # category 仅做校验
+    _inferred_skill_type = skill_type or infer_skill_type(name)
+    final_category = (category or SKILL_TYPES.get(_inferred_skill_type, SKILL_TYPES["generic"])["label"]).strip()
+    # triggers 仅做校验（用于提示用户至少填一个）
+    final_triggers = _extract_triggers(name, description, triggers)
+    if not final_triggers:
+        raise ValueError("Skill 触发词不能为空")
+
+    # 推断 skill_type
     if not skill_type:
         skill_type = infer_skill_type(name)
-    
-    # 创建 SKILL.md
-    skill_type_line = f"\nskill_type: {skill_type}" if skill_type and skill_type != "generic" else ""
-    skill_md_content = f"""---
-name: {name}
-description: |
-  {description}{skill_type_line}
----
+    if skill_type not in SKILL_TYPES:
+        skill_type = "generic"
 
-{body}"""
-    
+    # 创建目录
+    skill_dir = _get_write_dir(dir_name)
+    os.makedirs(skill_dir, exist_ok=True)
+
+    # 创建 SKILL.md（name/description/skill_type/triggers）
+    # 用 % 格式化避免 body 中可能含 { } 被 f-string 错误求值
+    skill_type_line = "\nskill_type: %s" % skill_type if skill_type and skill_type != "generic" else ""
+    # triggers 写入 frontmatter（逗号分隔字符串），运行时由 _parse_yaml_frontmatter 解析
+    user_triggers = []
+    if triggers:
+        for t in triggers:
+            t_str = str(t).strip()
+            if t_str and t_str != f"/{name}":
+                user_triggers.append(t_str)
+    triggers_line = "\ntriggers: %s" % ", ".join(user_triggers) if user_triggers else ""
+    # 缩进 description 以匹配 YAML 块标量格式
+    desc_lines = description.strip().split("\n")
+    indented_desc = "\n  ".join(desc_lines)
+    skill_md_content = (
+        "---\n"
+        "name: %s\n"
+        "description: |\n"
+        "  %s%s%s\n"
+        "---\n\n"
+        "%s\n"
+    ) % (name, indented_desc, skill_type_line, triggers_line, body.strip())
+
     skill_md_path = os.path.join(skill_dir, "SKILL.md")
     with open(skill_md_path, 'w', encoding='utf-8') as f:
         f.write(skill_md_content)
-    
+
     # 创建 references
     if references:
         refs_dir = os.path.join(skill_dir, "references")
         os.makedirs(refs_dir, exist_ok=True)
         for ref_name, ref_content in references.items():
-            ref_path = os.path.join(refs_dir, f"{ref_name}.md")
+            if not ref_content or not str(ref_content).strip():
+                continue
+            safe_name = _re.sub(r'[^a-zA-Z0-9_\-]', '_', str(ref_name))
+            ref_path = os.path.join(refs_dir, f"{safe_name}.md")
             with open(ref_path, 'w', encoding='utf-8') as f:
-                f.write(ref_content)
-    
-    # 刷新缓存
+                f.write(str(ref_content))
+
+    # 刷新缓存并返回新建的 skill
     refresh_skills_cache()
-    
-    # 返回新建的 skill
     skills = get_all_skills_cached()
     for s in skills:
         if s["template_key"] == _template_key(name):
             return s
-    return {"template_key": _template_key(name), "template_name": display_name, "category": category}
+    return {
+        "template_key": _template_key(name),
+        "template_name": final_display_name,
+        "category": final_category,
+        "display_name": final_display_name,
+        "skill_type": skill_type,
+        "description": description,
+        "triggers": final_triggers,
+    }
 
 
-def update_skill_files(skill_key: str, description: Optional[str] = None, body: Optional[str] = None, references: Optional[Dict[str, str]] = None, skill_type: Optional[str] = None) -> Dict:
-    """更新已有 Skill 文件（如果是内置 Skill，先复制到持久化目录再修改）"""
+def update_skill_files(
+    skill_key: str,
+    display_name: Optional[str] = None,
+    category: Optional[str] = None,
+    description: Optional[str] = None,
+    triggers: Optional[List[str]] = None,
+    body: Optional[str] = None,
+    references: Optional[Dict[str, str]] = None,
+    skill_type: Optional[str] = None,
+) -> Dict:
+    """更新已有 Skill 文件（如果是内置 Skill，先复制到持久化目录再修改）
+
+    说明:
+    - 只更新 description / body / skill_type / references
+    - display_name / category / triggers 仅做参数校验，不写入文件
+      （运行时从 description 自动推断）
+    """
     import shutil
     detail = get_skill_detail(skill_key)
     if not detail:
         raise ValueError(f"未找到 Skill: {skill_key}")
-    
+
     skill_dir = detail.get("skill_dir", "")
     if not skill_dir or not os.path.isdir(skill_dir):
         raise ValueError(f"Skill 目录不存在: {skill_dir}")
-    
+
     # 如果是内置 Skill（在 SKILLS_DIR 下），复制到持久化目录
     if skill_dir.startswith(os.path.abspath(SKILLS_DIR)):
         skill_dir_name = os.path.basename(skill_dir)
@@ -549,42 +624,60 @@ def update_skill_files(skill_key: str, description: Optional[str] = None, body: 
         shutil.copytree(skill_dir, persistent_dir, dirs_exist_ok=True)
         skill_dir = persistent_dir
         logger.info(f"内置 Skill 已复制到持久化目录: {persistent_dir}")
-    
+
     skill_md_path = os.path.join(skill_dir, "SKILL.md")
-    
+
     # 读取现有内容
     with open(skill_md_path, 'r', encoding='utf-8') as f:
         raw = f.read()
-    
+
     # 解析现有元数据
     metadata = _parse_yaml_frontmatter(raw)
     name = metadata.get('name', '')
-    
-    # 更新 SKILL.md
+
+    # 计算最终值
     final_desc = description if description is not None else metadata.get('description', '')
     final_body = body if body is not None else _get_skill_body(raw)
-    # 如果未指定新 skill_type，保留原有的
     final_skill_type = skill_type if skill_type is not None else metadata.get('skill_type', '')
-    
-    skill_type_line = f"\nskill_type: {final_skill_type}" if final_skill_type and final_skill_type != "generic" else ""
-    new_content = f"""---
-name: {name}
-description: |
-  {final_desc}{skill_type_line}
----
 
-    frontmatter = _format_skill_frontmatter({
-        "name": name,
-        "display_name": final_display_name.strip(),
-        "category": final_category.strip(),
-        "description": final_desc.strip(),
-        "triggers": final_triggers,
-    })
-    new_content = f"{frontmatter}\n\n{final_body.strip()}"
-    
+    # 校验最终值
+    if not final_desc or not final_desc.strip():
+        raise ValueError("Skill 描述不能为空")
+    if not final_body or not final_body.strip():
+        raise ValueError("Skill 工作流指令不能为空")
+    # 校验 triggers（运行时由 _extract_triggers 从 description 提取）
+    final_triggers = _extract_triggers(name, final_desc, triggers)
+    if not final_triggers:
+        raise ValueError("Skill 触发词不能为空")
+
+    if final_skill_type and final_skill_type not in SKILL_TYPES:
+        final_skill_type = "generic"
+
+    # 写入 SKILL.md
+    # 用 % 格式化避免 body 中可能含 { } 被 f-string 错误求值
+    skill_type_line = "\nskill_type: %s" % final_skill_type if final_skill_type and final_skill_type != "generic" else ""
+    # triggers 写入 frontmatter（逗号分隔字符串），运行时由 _parse_yaml_frontmatter 解析
+    user_triggers = []
+    if triggers:
+        for t in triggers:
+            t_str = str(t).strip()
+            if t_str and t_str != f"/{name}":
+                user_triggers.append(t_str)
+    triggers_line = "\ntriggers: %s" % ", ".join(user_triggers) if user_triggers else ""
+    desc_lines = final_desc.strip().split("\n")
+    indented_desc = "\n  ".join(desc_lines)
+    new_content = (
+        "---\n"
+        "name: %s\n"
+        "description: |\n"
+        "  %s%s%s\n"
+        "---\n\n"
+        "%s\n"
+    ) % (name, indented_desc, skill_type_line, triggers_line, final_body.strip())
+
     with open(skill_md_path, 'w', encoding='utf-8') as f:
         f.write(new_content)
-    
+
     # 更新 references
     if references is not None:
         refs_dir = os.path.join(skill_dir, "references")
@@ -595,17 +688,19 @@ description: |
                     os.remove(os.path.join(refs_dir, f))
         else:
             os.makedirs(refs_dir, exist_ok=True)
-        
+
         # 写入新的 references
+        import re as _re
         for ref_name, ref_content in references.items():
-            if ref_content.strip():  # 只写入非空内容
-                ref_path = os.path.join(refs_dir, f"{ref_name}.md")
+            if ref_content and str(ref_content).strip():
+                safe_name = _re.sub(r'[^a-zA-Z0-9_\-]', '_', str(ref_name))
+                ref_path = os.path.join(refs_dir, f"{safe_name}.md")
                 with open(ref_path, 'w', encoding='utf-8') as f:
-                    f.write(ref_content)
-    
+                    f.write(str(ref_content))
+
     # 刷新缓存
     refresh_skills_cache()
-    
+
     # 返回更新后的详情
     return get_skill_detail(skill_key) or {}
 

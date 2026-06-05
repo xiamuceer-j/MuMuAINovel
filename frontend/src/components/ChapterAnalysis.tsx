@@ -85,7 +85,7 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
       // 🔧 使用独立的章节加载函数
       await loadChapterInfo();
 
-      const response = await fetch(`/api/chapters/${chapterId}/generate-background-legacy`, { method: 'POST' });
+      const response = await fetch(`/api/chapters/${chapterId}/analysis/status`);
 
       if (response.status === 404) {
         setTask(null);
@@ -137,7 +137,7 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
   const startPolling = () => {
     const pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/chapters/${chapterId}/generate-background-legacy`, { method: 'POST' });
+        const response = await fetch(`/api/chapters/${chapterId}/analysis/status`);
         if (!response.ok) return;
 
         const taskData: AnalysisTask = await response.json();

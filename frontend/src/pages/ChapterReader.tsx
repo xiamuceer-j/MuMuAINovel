@@ -179,7 +179,7 @@ const ChapterReader: React.FC = () => {
       // 轮询分析状态
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await api.get(`/chapters/${chapterId}/analysis/status`);
+          const statusRes = await api.post(`/chapters/${chapterId}/generate-background-legacy`);
           const { status, progress, error_message } = statusRes.data;
 
           setAnalysisProgress(progress || 0);

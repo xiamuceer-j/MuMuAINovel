@@ -210,7 +210,13 @@ if static_dir.exists():
                 content={"detail": "API路径不存在"}
             )
         
-        file_path = static_dir / full_path
+        # 路径穿越防护：防止通过 ../ 读取 static_dir 之外的任意文件
+        file_path = (static_dir / full_path).resolve()
+        if not file_path.as_posix().startswith(static_dir.resolve().as_posix() + "/") and file_path.as_posix() != static_dir.resolve().as_posix():
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "页面不存在"}
+            )
         if file_path.is_file():
             return FileResponse(file_path)
         

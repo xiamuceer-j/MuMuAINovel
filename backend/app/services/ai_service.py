@@ -93,6 +93,7 @@ class AIService:
         user_id: Optional[str] = None,
         db_session: Optional[Any] = None,
         enable_mcp: bool = True,
+        disable_thinking: bool = False,
     ):
         self.raw_api_provider = (api_provider or app_settings.default_ai_provider or "openai").lower().strip()
         self.api_provider = normalize_provider(self.raw_api_provider)
@@ -106,6 +107,8 @@ class AIService:
         self.user_id = user_id
         self.db_session = db_session
         self._enable_mcp = enable_mcp
+        # 关闭思考（vLLM/Qwen 等思考模型）：通过 chat_template_kwargs 注入
+        self.disable_thinking = disable_thinking
         self._cached_tools: Optional[List[Dict]] = None
         self._tools_loaded = False
         
@@ -124,7 +127,12 @@ class AIService:
             openai_base_url = app_settings.openai_base_url
 
         if openai_key:
-            client = OpenAIClient(openai_key, openai_base_url or "https://api.openai.com/v1", self.config)
+            # 关闭思考: vLLM 标准写法, 不支持该字段的 OpenAI 兼容服务端会忽略
+            openai_extra_body = (
+                {"chat_template_kwargs": {"enable_thinking": False}}
+                if disable_thinking else None
+            )
+            client = OpenAIClient(openai_key, openai_base_url or "https://api.openai.com/v1", self.config, extra_body=openai_extra_body)
             self._openai_provider = OpenAIProvider(client)
         
         # 初始化 Anthropic
@@ -719,6 +727,7 @@ def create_user_ai_service_with_mcp(
     db_session,
     system_prompt: Optional[str] = None,
     enable_mcp: bool = True,
+    disable_thinking: bool = False,
 ) -> AIService:
     """
     创建支持MCP的用户AI服务
@@ -749,4 +758,5 @@ def create_user_ai_service_with_mcp(
         user_id=user_id,
         db_session=db_session,
         enable_mcp=enable_mcp,
+        disable_thinking=disable_thinking,
     )

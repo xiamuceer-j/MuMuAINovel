@@ -18,6 +18,7 @@ class Settings(Base):
     temperature = Column(Float, default=0.7, comment="温度参数")
     max_tokens = Column(Integer, default=2000, comment="最大token数")
     system_prompt = Column(Text, comment="系统级别提示词，每次AI调用都会使用")
+    disable_thinking = Column(Boolean, default=False, server_default="0", nullable=False, comment="是否关闭模型思考（vLLM等自部署思考模型，注入 enable_thinking=false）")
 
     # 封面图片生成配置
     cover_api_provider = Column(String(50), comment="封面图片API提供商")

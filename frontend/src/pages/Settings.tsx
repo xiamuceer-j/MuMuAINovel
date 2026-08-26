@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Select, Slider, InputNumber, message, Space, Typography, Spin, Modal, Alert, Grid, Tabs, List, Tag, Popconfirm, Empty, Row, Col, theme } from 'antd';
+import { Card, Form, Input, Button, Select, Slider, InputNumber, message, Space, Typography, Spin, Modal, Alert, Grid, Tabs, List, Tag, Popconfirm, Empty, Row, Col, Switch, theme } from 'antd';
 import { SaveOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, PlusOutlined, EditOutlined, CopyOutlined, WarningOutlined, PictureOutlined } from '@ant-design/icons';
 import { settingsApi, mcpPluginApi } from '../services/api';
 import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig } from '../types';
@@ -119,6 +119,7 @@ export default function SettingsPage() {
           llm_model: 'gpt-4',
           temperature: 0.7,
           max_tokens: 2000,
+          disable_thinking: false,
           ...defaultCoverSettings,
         });
       } else {
@@ -257,6 +258,7 @@ export default function SettingsPage() {
           llm_model: 'gpt-4',
           temperature: 0.7,
           max_tokens: 2000,
+          disable_thinking: false,
           ...defaultCoverSettings,
         });
         message.info('已重置为默认值，请点击保存');
@@ -1515,6 +1517,22 @@ export default function SettingsPage() {
                               min={1}
                               placeholder="2000"
                             />
+                          </Form.Item>
+
+                          <Form.Item
+                            label={
+                              <Space size={4}>
+                                <span>关闭模型思考</span>
+                                <InfoCircleOutlined
+                                  title="开启后向模型注入 enable_thinking=false（仅对 vLLM 等自部署的思考模型如 Qwen 生效）。关闭思考可大幅减少思考token消耗与生成耗时，适合正文创作类任务；对 OpenAI 官方等不支持该参数的服务端无影响"
+                                  style={{ color: token.colorTextSecondary, fontSize: isMobile ? '12px' : '14px' }}
+                                />
+                              </Space>
+                            }
+                            name="disable_thinking"
+                            valuePropName="checked"
+                          >
+                            <Switch />
                           </Form.Item>
 
                           <Form.Item

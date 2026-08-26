@@ -268,6 +268,7 @@ async def get_user_ai_service(
         db_session=db,                 # ✅ 传递 db_session
         system_prompt=settings.system_prompt,
         enable_mcp=enable_mcp,         # 根据MCP插件状态动态决定
+        disable_thinking=bool(getattr(settings, 'disable_thinking', False)),
     )
 
 
@@ -333,6 +334,7 @@ async def get_user_ai_service_from_db_by_usage(
         db_session=db,
         system_prompt=settings.system_prompt,
         enable_mcp=enable_mcp,
+        disable_thinking=bool(getattr(settings, 'disable_thinking', False)),
     )
 
 

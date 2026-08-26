@@ -3,6 +3,7 @@ import json
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from app.logger import get_logger, summarize_log_value
+from app.services.ai_config import AIClientConfig
 from app.utils.reasoning_text import (
     split_content_and_reasoning,
     sse_data_payload,
@@ -56,6 +57,21 @@ def _log_response_summary(data: Dict[str, Any]) -> None:
 class OpenAIClient(BaseAIClient):
     """OpenAI API 客户端"""
 
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        config: Optional[AIClientConfig] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Args:
+            extra_body: 额外合并到请求体顶层的参数（如 vLLM 的 chat_template_kwargs），
+                        仅对支持这些字段的 OpenAI 兼容服务端生效
+        """
+        super().__init__(api_key, base_url, config)
+        self.extra_body = extra_body or {}
+
     def _build_headers(self) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {self.api_key}",
@@ -78,6 +94,9 @@ class OpenAIClient(BaseAIClient):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # 合并额外请求体参数（如关闭思考: chat_template_kwargs={"enable_thinking": False}）
+        if self.extra_body:
+            payload.update(self.extra_body)
         if stream:
             payload["stream"] = True
         if uses_minimax_api(model, self.base_url):

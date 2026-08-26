@@ -81,6 +81,7 @@ export interface Settings {
   temperature: number;
   max_tokens: number;
   system_prompt?: string;
+  disable_thinking?: boolean;
   cover_api_provider?: string;
   cover_api_key?: string;
   cover_api_base_url?: string;
@@ -99,6 +100,7 @@ export interface SettingsUpdate {
   temperature?: number;
   max_tokens?: number;
   system_prompt?: string;
+  disable_thinking?: boolean;
   cover_api_provider?: string;
   cover_api_key?: string;
   cover_api_base_url?: string;

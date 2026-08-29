@@ -308,6 +308,8 @@ services:
       - GEMINI_BASE_URL=${GEMINI_BASE_URL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - ORCAROUTER_API_KEY=${ORCAROUTER_API_KEY:-}
+      - ORCAROUTER_BASE_URL=${ORCAROUTER_BASE_URL:-https://api.orcarouter.ai/v1}
       - DEFAULT_AI_PROVIDER=${DEFAULT_AI_PROVIDER:-openai}
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4o-mini}
       - DEFAULT_TEMPERATURE=${DEFAULT_TEMPERATURE:-0.7}
@@ -455,6 +457,11 @@ SESSION_COOKIE_SECURE=true
 # 本地 / Docker 内网 LLM（默认关闭，保持 SSRF 防护）
 # ALLOW_PRIVATE_AI_ENDPOINTS=true
 # ALLOWED_AI_HOSTS=host.docker.internal,127.0.0.1
+
+# OrcaRouter 内置适配器（可选，OpenAI 兼容的多模型 AI 网关）
+# 在设置页面选择 OrcaRouter（内置）即可使用 orcarouter/<model> 模型命名空间
+# ORCAROUTER_API_KEY=your_orcarouter_api_key_here
+# ORCAROUTER_BASE_URL=https://api.orcarouter.ai/v1
 ```
 
 > **🔐 Cookie Secure 说明**

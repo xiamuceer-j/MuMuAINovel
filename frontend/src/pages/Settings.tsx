@@ -293,9 +293,13 @@ export default function SettingsPage() {
   const mumuTextDefaultUrl = 'https://api.mumuverse.space/v1';
   const mumuRegisterUrl = 'https://api.mumuverse.space/register?aff=4NN8';
   const xiaomiMimoDefaultUrl = 'https://token-plan-cn.xiaomimimo.com/v1';
-  const builtInKeyProviders = ['xiaomi_mimo'];
+  const orcarouterDefaultUrl = 'https://api.orcarouter.ai/v1';
+  const builtInKeyProviders = ['xiaomi_mimo', 'orcarouter'];
   const xiaomiMimoDefaultModels = [
     { value: 'mimo-v2.5', label: 'mimo-v2.5', description: 'Xiaomi MiMo 官方内置推荐模型' },
+  ];
+  const orcarouterDefaultModels = [
+    { value: 'orcarouter/fusion-flash', label: 'orcarouter/fusion-flash', description: 'OrcaRouter 官方内置推荐模型' },
   ];
   const mumuCoverBaseUrlOptions = [
     { value: 'https://api.mumuverse.space/v1beta', label: 'https://api.mumuverse.space/v1beta', defaultModel: 'gemini-3.1-flash-image-preview' },
@@ -321,6 +325,13 @@ export default function SettingsPage() {
       label: 'Xiaomi MiMo（内置）',
       defaultUrl: xiaomiMimoDefaultUrl,
       defaultModel: xiaomiMimoDefaultModels[0].value,
+      builtInKey: true,
+    },
+    {
+      value: 'orcarouter',
+      label: 'OrcaRouter（内置）',
+      defaultUrl: orcarouterDefaultUrl,
+      defaultModel: orcarouterDefaultModels[0].value,
       builtInKey: true,
     },
     { value: 'openai', label: 'OpenAI Compatible', defaultUrl: 'https://api.openai.com/v1' },

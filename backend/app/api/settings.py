@@ -47,7 +47,7 @@ def read_env_defaults() -> Dict[str, Any]:
     provider_defaults = _resolve_provider_defaults(default_provider)
     return {
         "api_provider": default_provider,
-        "api_key": "" if default_provider == "xiaomi_mimo" else provider_defaults["api_key"],
+        "api_key": "" if default_provider in ("xiaomi_mimo", "orcarouter") else provider_defaults["api_key"],
         "api_base_url": provider_defaults["api_base_url"],
         "llm_model": app_settings.default_model,
         "temperature": app_settings.default_temperature,
@@ -67,6 +67,11 @@ def _resolve_provider_defaults(provider: Optional[str]) -> Dict[str, str]:
         return {
             "api_key": app_settings.xiaomi_mimo_api_key or "",
             "api_base_url": app_settings.xiaomi_mimo_base_url or "https://token-plan-cn.xiaomimimo.com/v1",
+        }
+    if raw_provider == "orcarouter":
+        return {
+            "api_key": app_settings.orcarouter_api_key or "",
+            "api_base_url": app_settings.orcarouter_base_url or "https://api.orcarouter.ai/v1",
         }
     if raw_provider == "anthropic":
         return {
@@ -652,7 +657,7 @@ async def get_available_models(
         api_key = resolved_config["api_key"]
         api_base_url = validate_ai_http_url(resolved_config["api_base_url"])
         async with httpx.AsyncClient(timeout=10.0) as client:
-            if provider == "openai" or provider == "azure" or provider == "custom":
+            if provider == "openai" or provider == "azure" or provider == "custom" or provider == "orcarouter":
                 # OpenAI 兼容接口获取模型列表
                 url = f"{api_base_url.rstrip('/')}/models"
                 headers = {

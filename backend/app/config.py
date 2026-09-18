@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     openai_base_url: Optional[str] = None
     xiaomi_mimo_api_key: Optional[str] = None
     xiaomi_mimo_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
+    # OrcaRouter built-in adapter (OpenAI-compatible multi-model AI gateway)
+    orcarouter_api_key: Optional[str] = None
+    orcarouter_base_url: str = "https://api.orcarouter.ai/v1"
     gemini_api_key: Optional[str] = None
     gemini_base_url: Optional[str] = None
     anthropic_api_key: Optional[str] = None

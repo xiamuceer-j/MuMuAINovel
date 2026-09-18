@@ -39,6 +39,8 @@ def normalize_provider(provider: Optional[str]) -> Optional[str]:
     normalized = provider.lower().strip()
     if normalized == "mumu":
         return "openai"
+    if normalized == "orcarouter":
+        return "orcarouter"
     return normalized
 
 
@@ -115,7 +117,8 @@ class AIService:
         self._openai_provider: Optional[OpenAIProvider] = None
         self._anthropic_provider: Optional[AnthropicProvider] = None
         self._gemini_provider: Optional[GeminiProvider] = None
-        
+        self._orcarouter_provider: Optional[OpenAIProvider] = None
+
         # 初始化 OpenAI 兼容接口
         openai_key = None
         openai_base_url = None
@@ -134,6 +137,21 @@ class AIService:
             )
             client = OpenAIClient(openai_key, openai_base_url or "https://api.openai.com/v1", self.config, extra_body=openai_extra_body)
             self._openai_provider = OpenAIProvider(client)
+
+        # Initialize OrcaRouter (OpenAI-compatible multi-model AI gateway)
+        # Like Xiaomi MiMo, it is a named OpenAI-compatible provider that reuses
+        # OpenAIClient, exposing the orcarouter/<model> namespace instead of an
+        # anonymous custom base URL.
+        if self.api_provider == "orcarouter":
+            orcarouter_key = api_key or app_settings.orcarouter_api_key
+            orcarouter_base_url = api_base_url or app_settings.orcarouter_base_url
+            if orcarouter_key:
+                orcarouter_extra_body = (
+                    {"chat_template_kwargs": {"enable_thinking": False}}
+                    if disable_thinking else None
+                )
+                client = OpenAIClient(orcarouter_key, orcarouter_base_url, self.config, extra_body=orcarouter_extra_body)
+                self._orcarouter_provider = OpenAIProvider(client)
         
         # 初始化 Anthropic
         anthropic_key = api_key if self.api_provider == "anthropic" else app_settings.anthropic_api_key
@@ -186,6 +204,8 @@ class AIService:
             return self._anthropic_provider
         if p == "gemini" and self._gemini_provider:
             return self._gemini_provider
+        if p == "orcarouter" and self._orcarouter_provider:
+            return self._orcarouter_provider
         raise ValueError(f"Provider {p} 未初始化")
 
     def _build_call_metrics(

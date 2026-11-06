@@ -290,16 +290,16 @@ export default function SettingsPage() {
     });
   };
 
-  const mumuTextDefaultUrl = 'https://zhongzhuan.mumuverse.space/v1';
-  const mumuRegisterUrl = 'https://zhongzhuan.mumuverse.space/register?aff=gt7d';
+  const mumuTextDefaultUrl = 'https://ai.mumuverse.space/v1';
+  const mumuRegisterUrl = 'https://ai.mumuverse.space/register?aff=gt7d';
   const xiaomiMimoDefaultUrl = 'https://token-plan-cn.xiaomimimo.com/v1';
   const builtInKeyProviders = ['xiaomi_mimo'];
   const xiaomiMimoDefaultModels = [
     { value: 'mimo-v2.5', label: 'mimo-v2.5', description: 'Xiaomi MiMo 官方内置推荐模型' },
   ];
   const mumuCoverBaseUrlOptions = [
-    { value: 'https://zhongzhuan.mumuverse.space/v1beta', label: 'https://zhongzhuan.mumuverse.space/v1beta', defaultModel: 'gemini-3.1-flash-image-preview' },
-    { value: 'https://zhongzhuan.mumuverse.space/v1', label: 'https://zhongzhuan.mumuverse.space/v1', defaultModel: 'gpt-image-2' },
+    { value: 'https://ai.mumuverse.space/v1beta', label: 'https://ai.mumuverse.space/v1beta', defaultModel: 'gemini-3.1-flash-image-preview' },
+    { value: 'https://ai.mumuverse.space/v1', label: 'https://ai.mumuverse.space/v1', defaultModel: 'gpt-image-2' },
   ];
   const defaultCoverSettings = {
     cover_enabled: false,

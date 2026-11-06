@@ -38,7 +38,7 @@
 
 **[☕ 请我喝杯咖啡](https://mumuverse.space:1588/)**
 
-**[🌐 MuMuのAPI站点](https://zhongzhuan.mumuverse.space/register?aff=gt7d)**
+**[🌐 MuMuのAPI站点](https://ai.mumuverse.space/register?aff=gt7d)**
 
 > 在 MuMu の API 站点充值满 50 元及以上，也可以获得下方赞助专属权益。
 

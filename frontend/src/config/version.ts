@@ -7,7 +7,7 @@
 
 export const VERSION_INFO = {
   // 应用版本号（从 package.json 读取，构建时注入）
-  version: import.meta.env.VITE_APP_VERSION || '1.5.7',
+  version: import.meta.env.VITE_APP_VERSION || '1.5.8',
   
   // 构建时间（将在构建时由 Vite 注入）
   buildTime: import.meta.env.VITE_BUILD_TIME || new Date().toISOString().split('T')[0],

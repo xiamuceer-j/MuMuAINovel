@@ -4,7 +4,7 @@
 
 <img src="frontend/public/logo.svg" alt="MuMuAINovel logo" width="120" />
 
-![Version](https://img.shields.io/badge/version-1.5.7-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.8-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.12-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109.0-green.svg)
 ![React](https://img.shields.io/badge/react-18.3.1-blue.svg)
@@ -286,7 +286,7 @@ services:
     environment:
       # 应用配置
       - APP_NAME=${APP_NAME:-MuMuAINovel}
-      - APP_VERSION=${APP_VERSION:-1.5.7}
+      - APP_VERSION=${APP_VERSION:-1.5.8}
       - APP_HOST=${APP_HOST:-0.0.0.0}
       - APP_PORT=8000
       - DEBUG=${DEBUG:-false}

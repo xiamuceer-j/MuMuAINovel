@@ -291,7 +291,7 @@ export default function SettingsPage() {
   };
 
   const mumuTextDefaultUrl = 'https://ai.mumuverse.space/v1';
-  const mumuRegisterUrl = 'https://ai.mumuverse.space/register?aff=gt7d';
+  const mumuRegisterUrl = 'https://ai.mumuverse.space/register?aff=Ob92';
   const xiaomiMimoDefaultUrl = 'https://token-plan-cn.xiaomimimo.com/v1';
   const builtInKeyProviders = ['xiaomi_mimo'];
   const xiaomiMimoDefaultModels = [
